@@ -1,16 +1,18 @@
 from src.utils import authenticate_gee, load_geometry, get_dw_median, export_image, download_sentinel_rgb
 import os
 import ee
+from dotenv import load_dotenv
+
 
 # Cargar variables de entorno
 load_dotenv('dot_env_content.txt')
 
 # === PARÁMETROS ===
 ONEDRIVE_PATH = os.getenv("ONEDRIVE_PATH")
-AOI_PATH = os.path.join(MAIN_PATH, "datos/area_estudio/area_estudio_dissolved.shp")  # Cambia esto si tienes otro AOI
-YEAR1=2023
-YEAR2=2024
-OUTPUT_DIR=os.path.join(MAIN_PATH, "monitoreo_bosques/datos/urban_sprawl")
+AOI_PATH = os.path.join(ONEDRIVE_PATH, "datos/area_estudio/area_estudio_dissolved.shp")  # Cambia esto si tienes otro AOI
+YEAR1=2021
+YEAR2=2022
+OUTPUT_DIR=os.path.join(ONEDRIVE_PATH, "monitoreo_bosques/datos/urban_sprawl")
 
 def main():
     authenticate_gee()

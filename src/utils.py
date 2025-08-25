@@ -1,6 +1,7 @@
 import ee
 import geemap
 import geopandas as gpd
+from shapely.geometry import Polygon, MultiPolygon
 
 def authenticate_gee(project='bosques-bogota-416214'):
     try:
@@ -13,7 +14,18 @@ def authenticate_gee(project='bosques-bogota-416214'):
 
 def load_geometry(path):
     gdf = gpd.read_file(path)
-    return ee.Geometry.Polygon(gdf.geometry.iloc[0].exterior.coords[:])
+
+    geom = gdf.geometry.iloc[0]
+
+    if isinstance(geom, Polygon):
+        return ee.Geometry.Polygon(list(geom.exterior.coords))
+    elif isinstance(geom, MultiPolygon):
+        # tomar el primer polígono del multipolígono
+        poly = list(geom.geoms)[0]
+        return ee.Geometry.Polygon(list(poly.exterior.coords))
+    else:
+        raise ValueError("La geometría no es Polygon ni MultiPolygon")
+
 
 
 def get_dw_median(year, geometry):
