@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 
 # Cargar variables de entorno
-load_dotenv('dot_env_content.txt')
+load_dotenv('dot_env_content.env')
 
 # === PARÁMETROS ===
 ONEDRIVE_PATH = os.getenv("ONEDRIVE_PATH")
