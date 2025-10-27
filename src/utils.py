@@ -1,31 +1,47 @@
 import ee
 import geemap
 import geopandas as gpd
+import numpy as np
+import pandas as pd
 from shapely.geometry import Polygon, MultiPolygon
+from rasterio.features import shapes
+import rasterio
+import os
+import matplotlib.pyplot as plt
 
 def authenticate_gee(project='bosques-bogota-416214'):
     try:
-        ee.Initialize(project="bosques-bogota-416214")
+        ee.Initialize(project=project)
     except Exception:
         print("🔐 Autenticando por primera vez...")
         ee.Authenticate()
-        ee.Initialize(project="bosques-bogota-416214")
-
+        ee.Initialize(project=project)
 
 def load_geometry(path):
+    """
+    Carga una o varias geometrías desde un shapefile o GeoJSON y
+    devuelve una geometría Earth Engine combinada (unión de todas).
+    """
     gdf = gpd.read_file(path)
 
-    geom = gdf.geometry.iloc[0]
+    # Verificar cuántas geometrías hay
+    if len(gdf) == 0:
+        raise ValueError("El archivo de geometría está vacío.")
+    
+    # Unir todas las geometrías en una sola
+    geom_union = gdf.unary_union
 
-    if isinstance(geom, Polygon):
-        return ee.Geometry.Polygon(list(geom.exterior.coords))
-    elif isinstance(geom, MultiPolygon):
-        # tomar el primer polígono del multipolígono
-        poly = list(geom.geoms)[0]
-        return ee.Geometry.Polygon(list(poly.exterior.coords))
+    # Convertir a geometría de EE
+    if isinstance(geom_union, Polygon):
+        coords = list(geom_union.exterior.coords)
+        geometry = ee.Geometry.Polygon(coords)
+    elif isinstance(geom_union, MultiPolygon):
+        polygons = [ee.Geometry.Polygon(list(poly.exterior.coords)) for poly in geom_union.geoms]
+        geometry = ee.Geometry.MultiPolygon(polygons)
     else:
-        raise ValueError("La geometría no es Polygon ni MultiPolygon")
+        raise ValueError("La geometría no es Polygon ni MultiPolygon.")
 
+    return geometry
 
 
 def get_dw_median(year, geometry):
@@ -47,35 +63,242 @@ def export_image(image, geometry, output_path):
         crs='EPSG:4326'
     )
     print("✅ Descarga completada.")
-    
 
 def download_sentinel_rgb(geometry, start_date, end_date, output_path, scale=10):
     """
     Descarga una imagen Sentinel-2 RGB (B4, B3, B2) como mediana del periodo especificado.
+    Usa bounding box para aligerar el request y reduce resolución a 20m.
     """
-    collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-                  .filterBounds(geometry)
-                  .filterDate(start_date, end_date)
-                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
-                  .select(['B4', 'B3', 'B2']))
+    print(f"⬇️ Descargando Sentinel-2 RGB entre {start_date.format('YYYY-MM-dd').getInfo()} y {end_date.format('YYYY-MM-dd').getInfo()}...")
 
-    image = collection.median().clip(geometry)
+    # Usar bounding box del AOI
+    geom_info = geometry.getInfo()
+    bbox_coords = ee.Geometry(geom_info).bounds()
+
+    collection = (
+        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+        .filterBounds(bbox_coords)
+        .filterDate(start_date, end_date)
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
+        .select(["B4", "B3", "B2"])
+    )
+
+    image = collection.median().clip(bbox_coords)
 
     geemap.download_ee_image(
         image=image,
         filename=output_path,
-        region=geometry,
-        scale=scale,
+        region=bbox_coords,
+        scale=scale, 
         crs="EPSG:4326"
     )
+    print(f"✅ Imagen Sentinel-2 descargada: {output_path}")
+
+def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output_dir):
+    """
+    Convierte el raster de expansión urbana a polígonos y calcula intersecciones
+    con SAC, Reservas y EEP. También guarda los polígonos sin intersección.
+    """
+    print("🔍 Generando polígonos de expansión urbana e intersecciones...")
+    with rasterio.open(new_urban_tif) as src:
+        mask = src.read(1) > 0
+        results = (
+            {"properties": {"value": v}, "geometry": s}
+            for s, v in shapes(src.read(1), mask=mask, transform=src.transform)
+        )
+        gdf_newurban = gpd.GeoDataFrame.from_features(results, crs=src.crs)
+
+    gdf_sac = gpd.read_file(sac_path).to_crs(gdf_newurban.crs)
+    gdf_res = gpd.read_file(reserva_path).to_crs(gdf_newurban.crs)
+    gdf_eep = gpd.read_file(eep_path).to_crs(gdf_newurban.crs)
+
+    gdf_inter_sac = gpd.overlay(gdf_newurban, gdf_sac, how="intersection")
+    gdf_inter_res = gpd.overlay(gdf_newurban, gdf_res, how="intersection")
+    gdf_inter_eep = gpd.overlay(gdf_newurban, gdf_eep, how="intersection")
+
+    gdf_inter_sac.to_file(os.path.join(output_dir, "intersec_sac.geojson"))
+    gdf_inter_res.to_file(os.path.join(output_dir, "intersec_reserva.geojson"))
+    gdf_inter_eep.to_file(os.path.join(output_dir, "intersec_eep.geojson"))
+
+    intersected = gpd.GeoDataFrame(pd.concat([gdf_inter_sac, gdf_inter_res, gdf_inter_eep], ignore_index=True))
+    intersected.to_file(os.path.join(output_dir, "new_urban_intersections.geojson"))
+    no_inter = gpd.overlay(gdf_newurban, intersected, how="difference")
+    no_inter.to_file(os.path.join(output_dir, "new_urban_no_intersections.geojson"))
+
+    print("✅ Intersecciones creadas correctamente.")
+
+def calculate_expansion_areas(
+    output_dir,
+    input_dir,
+    upl_path,
+    bogota_buffer_path=None,
+    save_summary=True
+):
+    """
+    Calcula áreas de expansión urbana (en m²) por UPL,
+    diferenciando intersección y no intersección.
+    Si se proporciona bogota_buffer_path, también calcula el área
+    de expansión dentro del buffer urbano.
+    """
+
+    print("📏 Calculando áreas de expansión urbana (m²)...")
+    crs = "EPSG:9377"
+    
+    # === Leer intersecciones y no intersecciones ===
+    gdf_no  = gpd.read_file(os.path.join(input_dir, "new_urban_no_intersections.geojson")).to_crs(crs)
+    gdf_no["area_m2"] = gdf_no.geometry.area
+    
+    gdf_inter = gpd.read_file(os.path.join(input_dir, "new_urban_intersections.geojson")).to_crs(crs)
+    gdf_inter["area_m2"] = gdf_inter.geometry.area
+
+    # === Leer UPL ===
+    gdf_upl = gpd.read_file(upl_path).to_crs(crs)
+
+    # === Calcular áreas por UPL ===
+    inter_upl = gpd.overlay(gdf_upl, gdf_inter, how="intersection")
+    nointer_upl = gpd.overlay(gdf_upl, gdf_no, how="intersection")
+
+    inter_upl["area_ha"] = inter_upl.geometry.area/10000
+    nointer_upl["area_ha"] = nointer_upl.geometry.area/10000
+
+    resumen_upl = (
+        inter_upl.groupby("NOMBRE")["area_ha"].sum().reset_index().rename(columns={"area_ha": "interseccion_ha"})
+        .merge(
+            nointer_upl.groupby("NOMBRE")["area_ha"].sum().reset_index().rename(columns={"area_ha": "no_interseccion_ha"}),
+            on="NOMBRE",
+            how="outer"
+        )
+        .fillna(0)
+    )
+    resumen_upl["total_ha"] = resumen_upl["interseccion_ha"] + resumen_upl["no_interseccion_ha"]
+
+    # === Calcular área dentro del buffer urbano (si se proporciona) ===
+    if bogota_buffer_path and os.path.exists(bogota_buffer_path):
+        print("🏙️ Calculando área de expansión dentro del buffer urbano...")
+        gdf_buffer = gpd.read_file(bogota_buffer_path).to_crs(crs)
+
+        # 1️⃣ Intersección entre buffer y áreas con intersección (SAC, Reserva, EEP)
+        inter_buffer_inter = gpd.overlay(gdf_buffer, gdf_inter, how="intersection")
+        inter_buffer_inter["area_ha"] = inter_buffer_inter.geometry.area / 10_000
+
+        # 2️⃣ Intersección entre buffer y áreas SIN intersección
+        inter_buffer_no = gpd.overlay(gdf_buffer, gdf_no, how="intersection")
+        inter_buffer_no["area_ha"] = inter_buffer_no.geometry.area / 10_000
+
+        # 3️⃣ Total (sumando ambas)
+        inter_buffer_total = pd.concat([inter_buffer_inter, inter_buffer_no], ignore_index=True)
+        inter_buffer_total["area_ha"] = inter_buffer_total.geometry.area / 10_000
+
+        # --- Resumen ---
+        resumen_buffer = pd.DataFrame({
+            "zona": ["Bogotá urbana (buffer)"],
+            "interseccion_ha": [round(inter_buffer_inter["area_ha"].sum(), 2)],
+            "no_interseccion_ha": [round(inter_buffer_no["area_ha"].sum(), 2)],
+            "total_ha": [round(inter_buffer_total["area_ha"].sum(), 2)]
+        })
+
+        resumen_buffer.to_csv(os.path.join(output_dir, "resumen_buffer_ha.csv"), index=False, encoding="utf-8")
+        print(f"✅ Resumen del buffer urbano guardado en: resumen_buffer_ha.csv")
+
+    else:
+        print("⚠️ No se proporcionó bogota_buffer_path o el archivo no existe. Saltando cálculo del buffer.")
 
 
-def get_year_dates(year):
+    # === Guardar resultados principales ===
+    if save_summary:
+        resumen_upl.to_csv(os.path.join(output_dir, "resumen_expansion_upl_ha.csv"), index=False, encoding="utf-8")
+        print("✅ Archivo guardado: resumen_expansion_upl_ha.csv")
+
+    return resumen_upl, resumen_buffer
+
+def build_urban_report_json(resumen_upl, resumen_buffer, mapa_interactivo_path, maps_dir, year1, year2, output_json):
     """
-    Retorna las fechas de inicio y fin del año como strings.
-    Ejemplo: get_year_dates(2023) → ('2023-01-01', '2024-01-01')
+    Construye el JSON para el reporte final de expansión urbana.
     """
-    start = f"{year}-01-01"
-    end_year = year + 1
-    end = f"{end_year}-01-01"
-    return start, end
+    print("📝 Construyendo JSON del reporte urbano...")
+
+    # Top 5 UPLs con mayor expansión
+    resumen_upl = resumen_upl.copy()
+    resumen_upl["total_ha"] = resumen_upl["total_m2"] / 10000
+    resumen_upl["interseccion_ha"] = resumen_upl["interseccion_m2"] / 10000
+    resumen_upl["no_interseccion_ha"] = resumen_upl["no_interseccion_m2"] / 10000
+    upls_top5 = resumen_upl.sort_values("total_ha", ascending=False).head(5).to_dict(orient="records")
+
+    # Centroides de expansión (clusters)
+    inter_path = os.path.join(maps_dir.replace("maps", "intersections"), "new_urban_intersections.geojson")
+    if os.path.exists(inter_path):
+        gdf_inter = gpd.read_file(inter_path).to_crs("EPSG:4326")
+        centroids = [{"id": i+1, "lat": round(pt.y, 5), "lon": round(pt.x, 5)} for i, pt in enumerate(gdf_inter.centroid)]
+    else:
+        centroids = []
+
+    data = {
+        "YEAR1": year1,
+        "YEAR2": year2,
+        "UPLS_TOP5": upls_top5,
+        "MAPA_INTERACTIVO": mapa_interactivo_path,
+        "CENTROIDES": centroids
+    }
+
+    with open(output_json, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    print(f"✅ JSON guardado: {output_json}")
+    return data
+
+def convert_tif_to_png(tif_path, out_png):
+    """Convierte un .tif RGB a .png visible para Folium."""
+    import numpy as np
+    import rasterio
+
+    with rasterio.open(tif_path) as src:
+        img = src.read([1, 2, 3])  # RGB
+        img = np.transpose(img, (1, 2, 0))
+        img = (img - img.min()) / (img.max() - img.min())  # normalizar
+        plt.imsave(out_png, img)
+    return out_png
+
+from shapely.ops import unary_union
+
+def create_growth_clusters(gdf_path, buffer_distance=500, crs="EPSG:9377"):
+    """
+    Crea clusters de crecimiento urbano agrupando polígonos que se tocan
+    o están a una distancia menor al buffer indicado.
+    """
+    print("🧩 Creando clusters de expansión urbana...")
+
+    gdf = gpd.read_file(gdf_path).to_crs(crs)
+    gdf["geometry_buffer"] = gdf.geometry.buffer(buffer_distance)
+    gdf = gdf.reset_index(drop=True)
+
+    # Lista para asignar IDs
+    gdf["cluster_id"] = -1
+    cluster_id = 0
+
+    for i in range(len(gdf)):
+        if gdf.loc[i, "cluster_id"] != -1:
+            continue  # ya asignado
+
+        cluster_id += 1
+        current = gdf.loc[[i], "geometry_buffer"].values[0]
+        members = [i]
+        changed = True
+
+        # Expandir el cluster con cualquier buffer que toque al actual
+        while changed:
+            overlaps = gdf[gdf.geometry_buffer.intersects(current) & (gdf.cluster_id == -1)]
+            if len(overlaps) > 0:
+                idxs = overlaps.index.tolist()
+                gdf.loc[idxs, "cluster_id"] = cluster_id
+                members.extend(idxs)
+                current = unary_union(gdf.loc[members, "geometry_buffer"])
+            else:
+                changed = False
+
+    # Restaurar geometría original y calcular área real
+    gdf["area_ha"] = gdf.geometry.area / 10000
+    gdf.drop(columns=["geometry_buffer"], inplace=True)
+
+    print(f"✅ {cluster_id} clusters creados correctamente.")
+    return gdf
+
