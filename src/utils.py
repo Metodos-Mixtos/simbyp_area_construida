@@ -1,13 +1,14 @@
 import ee
 import geemap
 import geopandas as gpd
-import numpy as np
 import pandas as pd
-from shapely.geometry import Polygon, MultiPolygon
-from rasterio.features import shapes
 import rasterio
 import os
 import matplotlib.pyplot as plt
+import calendar
+from shapely.geometry import Polygon, MultiPolygon
+from rasterio.features import shapes
+from datetime import date
 
 def authenticate_gee(project='bosques-bogota-416214'):
     try:
@@ -43,6 +44,32 @@ def load_geometry(path):
 
     return geometry
 
+def get_monthly_periods(month: int, year: int):
+    """
+    Genera automáticamente las fechas de comparación mensual
+    (mes anterior vs mes actual) en formato ISO (YYYY-MM-DD).
+
+    Ejemplo:
+    >>> get_monthly_periods(10, 2025)
+    (('2025-09-01', '2025-09-30'), ('2025-10-01', '2025-10-31'))
+    """
+    if month == 1:
+        prev_month = 12
+        prev_year = year - 1
+    else:
+        prev_month = month - 1
+        prev_year = year
+
+    # Primer y último día de cada mes
+    first_day_prev = date(prev_year, prev_month, 1)
+    last_day_prev = date(prev_year, prev_month, calendar.monthrange(prev_year, prev_month)[1])
+    first_day_curr = date(year, month, 1)
+    last_day_curr = date(year, month, calendar.monthrange(year, month)[1])
+
+    periodo_antes = (first_day_prev.isoformat(), last_day_prev.isoformat())
+    periodo_despues = (first_day_curr.isoformat(), last_day_curr.isoformat())
+
+    return periodo_antes, periodo_despues
 
 def get_dw_median(year, geometry):
     start = ee.Date(f"{year}-01-01")
@@ -52,6 +79,34 @@ def get_dw_median(year, geometry):
         .filterBounds(geometry) \
         .select('built')
     return dw.median().clip(geometry)
+
+def get_dw_median_period(start_date, end_date, geometry):
+    """
+    Calcula la mediana de probabilidad de la clase 'built' (Dynamic World)
+    para un periodo de fechas específico. Si el periodo no tiene imágenes,
+    devuelve una imagen vacía con valores 0 para evitar errores posteriores.
+    """
+    start = ee.Date(start_date)
+    end = ee.Date(end_date)
+
+    dw = (
+        ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+        .filterDate(start, end)
+        .filterBounds(geometry)
+        .select("built")
+    )
+
+    count = dw.size()
+    # Si hay imágenes, calcula la mediana; si no, crea una imagen con valores 0
+    dw_median = ee.Image(
+        ee.Algorithms.If(count.gt(0), dw.median(), ee.Image(0).rename("built"))
+    )
+
+    # Mensaje informativo
+    print(f"📅 Dynamic World {start_date} → {end_date}: {count.getInfo()} imágenes disponibles")
+
+    return dw_median.clip(geometry)
+
 
 def export_image(image, geometry, output_path):
     print(f"💾 Descargando imagen a: {output_path}")
@@ -67,32 +122,47 @@ def export_image(image, geometry, output_path):
 def download_sentinel_rgb(geometry, start_date, end_date, output_path, scale=10):
     """
     Descarga una imagen Sentinel-2 RGB (B4, B3, B2) como mediana del periodo especificado.
-    Usa bounding box para aligerar el request y reduce resolución a 20m.
+    Si no hay imágenes disponibles, no intenta descargar y muestra advertencia.
     """
-    print(f"⬇️ Descargando Sentinel-2 RGB entre {start_date.format('YYYY-MM-dd').getInfo()} y {end_date.format('YYYY-MM-dd').getInfo()}...")
+    import geemap
+    import ee
 
-    # Usar bounding box del AOI
-    geom_info = geometry.getInfo()
-    bbox_coords = ee.Geometry(geom_info).bounds()
+    start = ee.Date(start_date)
+    end = ee.Date(end_date)
+
+    print(f"⬇️ Descargando Sentinel-2 RGB entre {start_date} y {end_date}...")
 
     collection = (
         ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-        .filterBounds(bbox_coords)
-        .filterDate(start_date, end_date)
+        .filterBounds(geometry)
+        .filterDate(start, end)
         .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
         .select(["B4", "B3", "B2"])
     )
 
-    image = collection.median().clip(bbox_coords)
+    count = collection.size().getInfo()
+    print(f"📦 {count} imágenes disponibles en el rango.")
 
-    geemap.download_ee_image(
-        image=image,
-        filename=output_path,
-        region=bbox_coords,
-        scale=scale, 
-        crs="EPSG:4326"
-    )
-    print(f"✅ Imagen Sentinel-2 descargada: {output_path}")
+    if count == 0:
+        print("⚠️ No hay imágenes Sentinel-2 disponibles en este rango. Se omite descarga.")
+        return None
+
+    image = collection.median().clip(geometry)
+
+    try:
+        geemap.download_ee_image(
+            image=image,
+            filename=output_path,
+            region=geometry.bounds(),
+            scale=scale,
+            crs="EPSG:4326"
+        )
+        print(f"✅ Imagen Sentinel-2 descargada: {output_path}")
+        return output_path
+    except Exception as e:
+        print(f"⚠️ Error al descargar Sentinel-2: {e}")
+        return None
+
 
 def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output_dir):
     """
