@@ -27,6 +27,7 @@ load_dotenv('dot_env_content.env')
 INPUTS_PATH = os.getenv("INPUTS_PATH")
 AOI_PATH = os.path.join(INPUTS_PATH, "urban_sprawl", "area_estudio", "aestudio_bogota.geojson")
 LOGO_PATH = os.path.join(INPUTS_PATH, "gfw", "Logo_SDP.jpeg")
+GOOGLE_CLOUD_PROJECT = os.getenv("GCP_PROJECT")
 
 # Meses en español
 MONTHS_ES = {
@@ -65,7 +66,7 @@ def main(annio: int, mes: int):
     BUFFER_PATH = os.path.join(INPUTS_PATH, "urban_sprawl", "area_estudio", "bogota_urbana_buffer.geojson")
 
     # === Autenticación y AOI ===
-    authenticate_gee()
+    authenticate_gee(project=GOOGLE_CLOUD_PROJECT)
     geometry = load_geometry(AOI_PATH)
 
     # === 1. Dynamic World ===

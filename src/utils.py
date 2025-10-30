@@ -10,7 +10,7 @@ from shapely.geometry import Polygon, MultiPolygon
 from rasterio.features import shapes
 from datetime import date
 
-def authenticate_gee(project='bosques-bogota-416214'):
+def authenticate_gee(project: str):
     try:
         ee.Initialize(project=project)
     except Exception:
