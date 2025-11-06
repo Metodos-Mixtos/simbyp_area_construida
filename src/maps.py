@@ -1,16 +1,10 @@
 import os
 import pandas as pd
-import numpy as np
 import geopandas as gpd
-import matplotlib.pyplot as plt
-import rasterio
-from shapely.ops import unary_union
 import folium
 import json
 import ee
 
-from rasterio.enums import Resampling
-from PIL import Image
 from shapely.geometry import box
 
 
@@ -38,70 +32,6 @@ def get_cluster_bboxes(gdf):
             "area_ha": row.area_ha
         })
     return gpd.GeoDataFrame(bboxes, crs=gdf.crs)
-
-def make_after_map(
-    sentinel_after_tif,
-    intersec_sac,
-    intersec_reserva,
-    intersec_eep,
-    no_intersections,
-    aoi_path,
-    out_png
-):
-    """
-    Dibuja:
-      - Polígonos de new_urban sin intersección (verde)
-      - Polígonos de intersección (rojo)
-      - Límite del AOI
-      Fondo transparente
-    """
-    raster_crs = None
-    if sentinel_after_tif and os.path.exists(sentinel_after_tif):
-        with rasterio.open(sentinel_after_tif) as src:
-            raster_crs = src.crs
-
-    fig, ax = plt.subplots(figsize=(10, 10))
-
-    gdf_sac = gpd.read_file(intersec_sac)
-    gdf_res = gpd.read_file(intersec_reserva)
-    gdf_eep = gpd.read_file(intersec_eep)
-    gdf_no  = gpd.read_file(no_intersections)
-    aoi     = gpd.read_file(aoi_path)
-
-    ref_crs = raster_crs or aoi.crs
-    for g in [gdf_sac, gdf_res, gdf_eep, gdf_no, aoi]:
-        g.to_crs(ref_crs, inplace=True)
-
-    unions = []
-    for g in [gdf_sac, gdf_res, gdf_eep]:
-        if not g.empty:
-            unions.append(unary_union(g.geometry))
-    if unions:
-        gdf_red = gpd.GeoDataFrame(geometry=[unary_union(unions)], crs=ref_crs).explode(index_parts=False)
-    else:
-        gdf_red = gpd.GeoDataFrame(geometry=[], crs=ref_crs)
-
-    if not gdf_no.empty:
-        gdf_no.plot(ax=ax, facecolor="green", alpha=0.25, edgecolor="green", linewidth=0.8)
-    if not gdf_red.empty:
-        gdf_red.plot(ax=ax, facecolor="red", alpha=0.35, edgecolor="red", linewidth=0.8)
-    aoi.boundary.plot(ax=ax, color="black", linewidth=1.2)
-
-    ax.set_title("Expansión urbana y áreas de restricción")
-    ax.set_axis_off()
-    fig.tight_layout()
-    fig.savefig(out_png, dpi=300, transparent=True)
-    plt.close(fig)
-    print(f"✅ Mapa guardado en: {out_png}")
-
-import folium, geopandas as gpd, pandas as pd, os, json
-
-import folium
-import geopandas as gpd
-import pandas as pd
-import os
-import json
-import calendar
 
 def plot_expansion_interactive(
     intersections_dir: str,
