@@ -1,11 +1,11 @@
 import ee
-import geopandas as gpd 
-from pathlib import Path
+import geopandas as gpd
 import os
-from shapely.geometry import Polygon, MultiPolygon
 import geemap
-from datetime import datetime
 import calendar
+from pathlib import Path
+from shapely.geometry import Polygon, MultiPolygon
+from datetime import datetime
 
 def authenticate_gee(project: str):
     """Autenticar en Google Earth Engine."""
@@ -50,7 +50,6 @@ def make_relative_path(path, base_dir):
         return str(path.relative_to(base_dir))
     except ValueError:
         return str(os.path.relpath(path, base_dir))
-
 
 def set_dates(mes, anio):
     

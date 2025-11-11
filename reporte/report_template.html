@@ -24,13 +24,12 @@
   <header><img src="{{LOGO}}" alt="Logo entidad"></header>
   <div class="wrap">
     <h1>Reporte mensual de expansión urbana en Bogotá</h1>
-    <div class="note">{{FECHA_REPORTE}}</div>
-    <div class="note">Periodo de análisis: {{PERIODO_ANALISIS}}</div>
+    <div class="note">{{FECHA_REPORTE}}</div> 
 
     <h2>Resumen</h2>
     A continuación, se muestran las cinco Unidades de Planeamiento Local (UPLs) con mayor aumento del área construida en áreas con restricciones para la construcción, el periodo seleccionado. 
     <table>
-      <tr><th>UPL</th><th>Nueva área construida en áreas no permitidas (ha)</th><th>Nueva área construida en áreas estrictamente restringidas (ha)</th><th>Total de nueva área construida (ha)</th></tr>
+      <tr><th>UPL</th><th>Nueva área construida en áreas no permitidas (ha)</th><th>Nueva área construida estricta en áreas no permitidas (ha)</th><th>Total de nueva área construida (ha)</th></tr>
       {{#TOP_UPLS}}
       <tr><td>{{UPL}}</td><td>{{INTER_HA}}</td><td>{{INTER_HA_STRICT}}</td><td>{{TOTAL_HA}}</td></tr>
       {{/TOP_UPLS}}
@@ -43,7 +42,7 @@
     </section>
       <div class="card">
         <h2>Metodología</h2>
-        <p>Para la detección de expansión urbana se utlizó el enfoque Detención de cambio de coberturras usando bandas de probabilidad, basado en el conjunto de datos Dynamic World de Google Earth Engine. Este conjunto de datos proporciona, para cada píxel y fecha, las probabilidades de pertenecer a diferentes clases de cobertura, entre ellas la clase Área construida. Se generaron dos composiciones anuales promedio de dicha clase: una correspondiente al periodo “antes” (por ejemplo, julio de 2025) y otra al periodo “después” (por ejemplo, agosto de 2025). Estas composiciones reflejan la probabilidad media de urbanización en cada píxel durante ambos periodos. A partir de estas imágenes, se aplicó un umbral probabilístico para identificar las zonas que pasaron de ser no urbanas a urbanas: píxeles con una probabilidad de urbanización inferior a 0.2 en el periodo anterior y superior a 0.5 en el periodo posterior se clasificaron como áreas de nueva expansión urbana. De este modo, el resultado obtenido corresponde a una capa binaria que indica la ocurrencia de cambio de uso del suelo hacia cobertura urbana.</p>
+        <p>Para la detección de expansión urbana se utlizó el enfoque Detención de cambio de coberturras usando bandas de probabilidad, basado en el conjunto de datos Dynamic World de Google Earth Engine. Este conjunto de datos proporciona, para cada píxel y fecha, las probabilidades de pertenecer a diferentes clases de cobertura, entre ellas la clase Área construida. Se generaron dos mosaicos anuales con fecha de corte al final de cada mes: una correspondiente al periodo “antes” (por ejemplo, julio de 2025) y otra al periodo “después” (por ejemplo, agosto de 2025). Estas composiciones reflejan la probabilidad de urbanización en cada píxel durante ambos periodos. A partir de estas imágenes, se aplicó un umbral probabilístico para identificar las zonas que pasaron de ser no construidas a construidas: píxeles con una probabilidad de urbanización inferior a 0,2 en el periodo anterior y superior a 0,5 en el periodo posterior se clasificaron como áreas de nueva expansión urbana. También se creó una regla más estricta que pasa de 0,2 a 0,7. De este modo, el resultado obtenido corresponde a una capa binaria que indica la ocurrencia de cambio de uso del suelo hacia cobertura urbana.</p>
         <p>Posteriormente, el resultado de expansión urbana se intersectó con tres capas ambientales y normativas clave:</p>
         <ul>
           <li><strong>Situación ambientalmente conflictiva:</strong> identifica zonas de alta presión antrópica o conflictos de uso del suelo.</li>

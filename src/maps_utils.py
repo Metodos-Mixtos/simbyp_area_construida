@@ -2,8 +2,9 @@ import geopandas as gpd
 import folium
 import json
 import os
+import ee
 import pandas as pd
-
+from src.config import GOOGLE_CLOUD_PROJECT
 
 def sanitize_gdf(gdf):
     """Sanitizar GeoDataFrame para evitar problemas al exportar a GeoJSON."""
@@ -16,8 +17,82 @@ def sanitize_gdf(gdf):
             gdf[col] = gdf[col].apply(lambda v: str(v) if not isinstance(v, (int, float, str)) else v)
     return gdf
 
+def get_tiles_from_ee(
+    aoi_path: str,
+    end_t1: str,
+    end_t2: str,
+    dataset: str = "SENTINEL",
+    lookback_days: int = 365
+):
+    """
+    Devuelve URLs de tiles (T1 y T2) desde Google Earth Engine para Sentinel o Dynamic World.
+    Ambos usan lookback_days para tomar la imagen más reciente antes de cada fecha final.
+    """
+    ee.Initialize(project=GOOGLE_CLOUD_PROJECT)
 
-def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, aoi_path=None, tiles_before=None, tiles_current=None):
+    aoi = gpd.read_file(aoi_path)
+    minx, miny, maxx, maxy = aoi.total_bounds
+    geom = ee.Geometry.BBox(minx, miny, maxx, maxy)
+
+    if dataset == "SENTINEL":
+        col_id = "COPERNICUS/S2_SR_HARMONIZED"
+        vis = {"min": 0, "max": 3000, "bands": ["B4", "B3", "B2"], "gamma": 1.1}
+        sel = ["B4", "B3", "B2"]
+
+        def get_tile_url(end):
+            end_ee = ee.Date(end)
+            start_ee = end_ee.advance(-lookback_days, "day")
+
+            collection = (
+                ee.ImageCollection(col_id)
+                .filterDate(start_ee, end_ee)
+                .filterBounds(geom)
+                .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
+                .select(sel)
+                .sort("system:time_start", False)
+                .sort("system:index")
+            )
+
+            # Tomar el mosaico más limpio del período
+            image = collection.mosaic().clip(geom)
+            return image.getMapId(vis)["tile_fetcher"].url_format
+
+    elif dataset == "DW":
+        col_id = "GOOGLE/DYNAMICWORLD/V1"
+        vis = {
+            "min": 0,
+            "max": 8,
+            "palette": [
+                "#419BDF", "#397D49", "#88B053", "#7A87C6",
+                "#E49635", "#DFC35A", "#C4281B", "#A59B8F", "#B39FE1"
+            ]
+        }
+        sel = ["label"]
+
+        def get_tile_url(end):
+            end_ee = ee.Date(end)
+            start_ee = end_ee.advance(-lookback_days, "day")
+
+            collection = (
+                ee.ImageCollection(col_id)
+                .filterDate(start_ee, end_ee)
+                .filterBounds(geom)
+                .select(sel)
+                .sort("system:time_start", False)
+                .sort("system:index")
+            )
+
+            image = collection.mosaic().clip(geom)
+            return image.getMapId(vis)["tile_fetcher"].url_format
+
+    else:
+        raise ValueError("dataset debe ser 'SENTINEL' o 'DW'")
+
+    return {
+        "t1": get_tile_url(end_t1),
+        "t2": get_tile_url(end_t2)
+    }
+def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, aoi_path=None, tiles_before=None, tiles_current=None):
     
     """Generar mapa interactivo de expansión urbana con folium."""
 
@@ -45,21 +120,21 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     bounds = [[miny, minx], [maxy, maxx]]
     
     # Capas Sentinel RGB (ajustadas con límites dinámicos)
-    if tiles_before and os.path.exists(tiles_before):
-        folium.raster_layers.ImageOverlay(
-            name="Sentinel Antes",
-            bounds=bounds,
-            image=tiles_before,
-            opacity=0.85
-        ).add_to(m)
+    folium.TileLayer(
+        tiles=tiles_before,
+        name=f"Sentinel-2 {previous_month_str}",
+        attr="Sentinel-2 EE Mosaic",
+        overlay=True,
+        show=True
+    ).add_to(m)
 
-    if tiles_current and os.path.exists(tiles_current):
-        folium.raster_layers.ImageOverlay(
-            name="Sentinel Después",
-            bounds=bounds,
-            image=tiles_current,
-            opacity=0.85
-        ).add_to(m)
+    folium.TileLayer(
+        tiles=tiles_current,
+        name=f"Sentinel-2 {month_str}",
+        attr="Sentinel-2 EE Mosaic",
+        overlay=True,
+        show=False
+    ).add_to(m)
 
     # Capas de expansión urbana
     normal_path = os.path.join(intersections_dir, "new_urban_intersections.geojson")
@@ -75,14 +150,39 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
                        style_function=lambda x: {"color": "purple", "weight": 1.5, "fillOpacity": 0.5}).add_to(m)
         
     # Capas base (SAC, Reserva, EEP)
-    folium.GeoJson(json.loads(gdf_sac.to_json()), name="SAC",
+    folium.GeoJson(json.loads(gdf_sac.to_json()), name="Conflictos Socioambientales",
                    style_function=lambda x: {"color": "#E31A1C", "weight": 1}, show=False).add_to(m)
-    folium.GeoJson(json.loads(gdf_res.to_json()), name="Reserva",
+    folium.GeoJson(json.loads(gdf_res.to_json()), name="Cerros Orientales",
                    style_function=lambda x: {"color": "#1F78B4", "weight": 1}, show=False).add_to(m)
-    folium.GeoJson(json.loads(gdf_eep.to_json()), name="EEP",
+    folium.GeoJson(json.loads(gdf_eep.to_json()), name="Estructura Ecológica Principal1",
                    style_function=lambda x: {"color": "#33A02C", "weight": 1}, show=False).add_to(m)
 
 
     # Control de capas y guardado
     folium.LayerControl(collapsed=False).add_to(m)
     m.save(output_path)
+    
+def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, sac, reserva, eep):
+    """Genera mosaicos Sentinel y mapa interactivo"""
+    sentinel_tiles = get_tiles_from_ee(
+        aoi_path=aoi_path,
+        end_t1=bounds_prev,
+        end_t2=bounds_curr,
+        dataset="SENTINEL",
+        lookback_days=365
+    )
+
+    map_html = os.path.join(dirs["maps"], f"map_expansion.html")
+    plot_expansion_interactive(
+        intersections_dir=dirs["intersections"],
+        sac_path=sac,
+        reserva_path=reserva,
+        eep_path=eep,
+        output_path=map_html,
+        aoi_path=aoi_path, 
+        month_str=month_str, 
+        previous_month_str=previous_month_str, 
+        tiles_before=sentinel_tiles["t1"],
+        tiles_current=sentinel_tiles["t2"]
+    )
+    return map_html

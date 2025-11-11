@@ -12,7 +12,6 @@ def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output
     genera intersecciones con SAC, Reserva y EEP,
     y maneja el caso en que no haya geometrías válidas.
     """
-    print("🔍 Generando intersecciones...")
     base_name = Path(new_urban_tif).stem
 
     with rasterio.open(new_urban_tif) as src:
