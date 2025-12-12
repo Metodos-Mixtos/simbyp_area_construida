@@ -52,7 +52,7 @@ def process_dynamic_world(geometry, output_dir, last_day_prev, last_day_curr):
     return paths
 
 
-def build_report(df_path, strict_path, map_html, logo_path, output_dir, month, year):
+def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_path, footer_img_path, output_dir, month, year):
     """Genera reporte final en JSON y HTML"""
     df = pd.read_csv(df_path)
     if os.path.exists(strict_path):
@@ -76,9 +76,12 @@ def build_report(df_path, strict_path, map_html, logo_path, output_dir, month, y
     data = {
         "TITULO": "Reporte de expansión urbana en Bogotá",
         "FECHA_REPORTE": f"{month.capitalize()} {year}",
-        "LOGO": make_relative_path(logo_path, base_dir),
+        "HEADER_IMG1": make_relative_path(header_img1_path, base_dir),
+        "HEADER_IMG2": make_relative_path(header_img2_path, base_dir),
+        "FOOTER_IMG": make_relative_path(footer_img_path, base_dir),
         "TOP_UPLS": top_upls,
-        "MAPA_INTERACTIVO": make_relative_path(map_html, base_dir)
+        "MAPA_INTERACTIVO": make_relative_path(map_html, base_dir),
+        "FUENTE": "Dynamic World, Google Earth Engine"
     }
 
     json_path = os.path.join(output_dir, "urban_sprawl_reporte.json")

@@ -4,11 +4,14 @@
   <meta charset="utf-8">
   <title>{{TITULO}}</title>
   <style>
-    body { margin:0; padding:0; background:white; color:#1a1a1a; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; }
-    header {background: #E4002D; padding: 1rem;}
-    header img {height: 70px;}
+    body { margin:0; padding:0; background:white; color:#1a1a1a; font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; }
+    header.banner { background:#e3351f; width:100%; margin:0; padding:1.5rem 0; display:flex; justify-content:space-between; align-items:center; }
+    header.banner img { height:70px; margin:0 2rem; }
+    footer.banner { background:#e3351f; width:100%; margin:3rem 0 0 0; padding:1.5rem 0; text-align:center; }
+    footer.banner img { height:70px; }
     .wrap {max-width: 1000px; margin: 0 auto; padding: 2rem;}
-    h1 {font-size: 22pt; font-weight: bold;}
+    h1 {font-size: 22pt; font-weight: bold; text-align: center;}
+    .note {font-size: 11pt; color: #555; text-align: center;}
     h2 {color: #8F0000; margin-top: 2rem;}
     h3 {margin-top: 1rem;}
     .card { background:#fafafa; border:1px solid #ddd; border-radius:6px; padding:1rem; margin-bottom:1rem; }
@@ -21,7 +24,10 @@
   </style>
 </head>
 <body>
-  <header><img src="{{LOGO}}" alt="Logo entidad"></header>
+  <header class="banner">
+    <img src="{{HEADER_IMG1}}" alt="Aquí sí pasa Bogotá">
+    <img src="{{HEADER_IMG2}}" alt="Bogotá">
+  </header>
   <div class="wrap">
     <h1>Reporte mensual de expansión urbana en Bogotá</h1>
     <div class="note">{{FECHA_REPORTE}}</div> 
@@ -56,5 +62,9 @@
       </div>
 
   </div>
+  
+  <footer class="banner">
+    <img src="{{FOOTER_IMG}}" alt="Secretaría de Planeación">
+  </footer>
 </body>
 </html>

@@ -4,7 +4,7 @@ from datetime import datetime
 import locale
 import sys
 import os
-from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, LOGO_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH
+from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH
 from src.aux_utils import authenticate_gee, load_geometry, set_dates
 from src.stats_utils import calculate_expansion_areas, create_intersections
 from src.pipeline_utils import prepare_folders, process_dynamic_world,build_report 
@@ -55,7 +55,9 @@ def main(anio: int, mes: int):
         df_path=f"{dirs['stats']}/resumen_expansion_upl_ha.csv",
         strict_path=f"{dirs['stats']}/resumen_expansion_upl_ha_strict.csv",
         map_html=map_html,
-        logo_path=LOGO_PATH,
+        header_img1_path=HEADER_IMG1_PATH,
+        header_img2_path=HEADER_IMG2_PATH,
+        footer_img_path=FOOTER_IMG_PATH,
         output_dir=dirs["reportes"],
         month=month_str,
         year=anio
