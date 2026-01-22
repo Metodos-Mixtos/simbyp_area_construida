@@ -10,6 +10,12 @@ from src.stats_utils import calculate_expansion_areas, create_intersections
 from src.pipeline_utils import prepare_folders, process_dynamic_world,build_report 
 from src.maps_utils import generate_maps  
 
+import dotenv
+dotenv.load_dotenv()
+
+#Authenticate with Google Cloud
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
 # === Configurar idioma español para nombres de meses ===
 try:
     locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")

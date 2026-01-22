@@ -4,3 +4,4 @@ dotenv
 geemap
 geopandas
 shapely
+gcsfs

@@ -3,8 +3,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Buscar .env en la raíz del proyecto (3 niveles arriba: src -> urban_sprawl -> bosques-bog -> raíz)
-env_path = Path(__file__).parent.parent.parent.parent / "dot_env_content.env"
-load_dotenv(env_path)
+load_dotenv()
 
 # === Paths base ===
 BASE_PATH = os.getenv("INPUTS_PATH")
