@@ -1,15 +1,38 @@
 import json
 import re
 from pathlib import Path
+from google.cloud import storage
 
 SECTION_PAT = re.compile(r"{{#(\w+)}}(.*?){{/\1}}", re.DOTALL)
 TOKEN_PAT = re.compile(r"{{\s*([\w\.]+)\s*}}")
 
+def _read_text(path):
+    p = str(path)
+    if p.startswith("gs://"):
+        # parse gs://bucket/path/to/blob
+        _, rest = p.split("gs://", 1)
+        bucket_name, blob_path = rest.split("/", 1)
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+        return blob.download_as_bytes().decode("utf-8")
+    else:
+        return Path(p).read_text(encoding="utf-8")
+
 def render(template_path: Path, data_path: Path, out_path: Path):
-    template = template_path.read_text(encoding="utf-8")
-    data = json.loads(data_path.read_text(encoding="utf-8"))
+    template = _read_text(template_path)
+    data = json.loads(_read_text(data_path))
     html = render_template(template, data)
-    out_path.write_text(html, encoding="utf-8")
+    if str(out_path).startswith("gs://"):
+        # upload to GCS
+        _, rest = str(out_path).split("gs://", 1)
+        bucket_name, blob_path = rest.split("/", 1)
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+        blob.upload_from_string(html.encode("utf-8"), content_type="text/html")
+    else:
+        out_path.write_text(html, encoding="utf-8")
     return out_path
 
 def render_template(tpl: str, root: dict) -> str:

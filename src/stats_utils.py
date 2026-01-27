@@ -2,9 +2,11 @@ import geopandas as gpd
 import pandas as pd
 import rasterio
 import os
+import shutil
 from shapely.geometry import shape
 from rasterio.features import shapes
 from pathlib import Path
+from src.aux_utils import download_gcs_to_temp
 
 def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output_dir):
     """
@@ -40,9 +42,46 @@ def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output
 
     gdf_newurban = gpd.GeoDataFrame(features, geometry="geometry", crs=src.crs)
 
-    gdf_sac = gpd.read_file(sac_path).to_crs(gdf_newurban.crs)
-    gdf_res = gpd.read_file(reserva_path).to_crs(gdf_newurban.crs)
-    gdf_eep = gpd.read_file(eep_path).to_crs(gdf_newurban.crs)
+    sac_local = download_gcs_to_temp(sac_path)
+    res_local = download_gcs_to_temp(reserva_path)
+    eep_local = download_gcs_to_temp(eep_path)
+
+    gdf_sac = gpd.read_file(sac_local).to_crs(gdf_newurban.crs)
+    gdf_res = gpd.read_file(res_local).to_crs(gdf_newurban.crs)
+    gdf_eep = gpd.read_file(eep_local).to_crs(gdf_newurban.crs)
+
+    # Clean up temp files
+    for p, lp in [(sac_path, sac_local), (reserva_path, res_local), (eep_path, eep_local)]:
+        if str(p).startswith("gs://"):
+            temp_dir = os.path.dirname(lp)
+            if os.path.isdir(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                except PermissionError as e:
+                    print(f"⚠️ No se pudo eliminar el directorio temporal {temp_dir}: {e}. Continuando...")
+            else:
+                if os.path.exists(lp):
+                    try:
+                        os.unlink(lp)
+                    except PermissionError as e:
+                        print(f"⚠️ No se pudo eliminar el archivo temporal {lp}: {e}. Continuando...")
+
+    # Clean up temp files
+    # Clean up temp files
+    for p, lp in [(sac_path, sac_local), (reserva_path, res_local), (eep_path, eep_local)]:
+        if str(p).startswith("gs://"):
+            temp_dir = os.path.dirname(lp)
+            if os.path.isdir(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                except PermissionError as e:
+                    print(f"⚠️ No se pudo eliminar el directorio temporal {temp_dir}: {e}. Continuando...")
+            else:
+                if os.path.exists(lp):
+                    try:
+                        os.unlink(lp)
+                    except (PermissionError, OSError) as e:
+                        print(f"⚠️ No se pudo eliminar el archivo temporal {lp}: {e}. Continuando...")
 
     gdf_inter = pd.concat([
         gpd.overlay(gdf_newurban, gdf_sac, how="intersection"),
@@ -71,7 +110,26 @@ def calculate_expansion_areas(input_dir, output_dir, upl_path, prefix="", file_s
     gdf_no = gpd.read_file(path_no).to_crs(crs)
     gdf_inter = gpd.read_file(path_inter).to_crs(crs)
 
-    gdf_upl = gpd.read_file(upl_path).to_crs(crs)
+    upl_local = download_gcs_to_temp(upl_path)
+    gdf_upl = gpd.read_file(upl_local).to_crs(crs)
+    print(f"Debug: UPL columns: {list(gdf_upl.columns)}")
+    if "NOMBRE" not in gdf_upl.columns:
+        raise ValueError(f"La columna 'NOMBRE' no existe en el archivo UPL. Columnas disponibles: {list(gdf_upl.columns)}")
+
+    # Clean up temp file
+    if str(upl_path).startswith("gs://"):
+        temp_dir = os.path.dirname(upl_local)
+        if os.path.isdir(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+            except PermissionError as e:
+                print(f"⚠️ No se pudo eliminar el directorio temporal {temp_dir}: {e}. Continuando...")
+        else:
+            if os.path.exists(upl_local):
+                try:
+                    os.unlink(upl_local)
+                except (PermissionError, OSError) as e:
+                    print(f"⚠️ No se pudo eliminar el archivo temporal {upl_local}: {e}. Continuando...")
 
     inter_upl = gpd.overlay(gdf_upl, gdf_inter, how="intersection")
     nointer_upl = gpd.overlay(gdf_upl, gdf_no, how="intersection")
