@@ -92,7 +92,7 @@ def get_tiles_from_ee(
         "t1": get_tile_url(end_t1),
         "t2": get_tile_url(end_t2)
     }
-def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, aoi_path=None, tiles_before=None, tiles_current=None):
+def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path=None, tiles_before=None, tiles_current=None):
     
     """Generar mapa interactivo de expansión urbana con folium."""
 
@@ -122,7 +122,7 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     # Capas Sentinel RGB (ajustadas con límites dinámicos)
     folium.TileLayer(
         tiles=tiles_before,
-        name=f"Sentinel-2 {previous_month_str}",
+        name=f"Sentinel-2 {previous_month_str} {year}",
         attr="Sentinel-2 EE Mosaic",
         overlay=True,
         show=True
@@ -130,7 +130,7 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
 
     folium.TileLayer(
         tiles=tiles_current,
-        name=f"Sentinel-2 {month_str}",
+        name=f"Sentinel-2 {month_str} {year}",
         attr="Sentinel-2 EE Mosaic",
         overlay=True,
         show=False
@@ -153,16 +153,16 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     folium.GeoJson(json.loads(gdf_sac.to_json()), name="Conflictos Socioambientales",
                    style_function=lambda x: {"color": "#E31A1C", "weight": 1}, show=False).add_to(m)
     folium.GeoJson(json.loads(gdf_res.to_json()), name="Cerros Orientales",
-                   style_function=lambda x: {"color": "#1F78B4", "weight": 1}, show=False).add_to(m)
-    folium.GeoJson(json.loads(gdf_eep.to_json()), name="Estructura Ecológica Principal1",
-                   style_function=lambda x: {"color": "#33A02C", "weight": 1}, show=False).add_to(m)
+                   style_function=lambda x: {"color": "#073013", "weight": 1}, show=False).add_to(m)
+    folium.GeoJson(json.loads(gdf_eep.to_json()), name="Estructura Ecológica Principal",
+                   style_function=lambda x: {"color": "#388900", "weight": 1}, show=False).add_to(m)
 
 
     # Control de capas y guardado
     folium.LayerControl(collapsed=False).add_to(m)
     m.save(output_path)
     
-def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, sac, reserva, eep):
+def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, year, sac, reserva, eep):
     """Genera mosaicos Sentinel y mapa interactivo"""
     sentinel_tiles = get_tiles_from_ee(
         aoi_path=aoi_path,
@@ -181,7 +181,8 @@ def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_
         output_path=map_html,
         aoi_path=aoi_path, 
         month_str=month_str, 
-        previous_month_str=previous_month_str, 
+        previous_month_str=previous_month_str,
+        year=year,
         tiles_before=sentinel_tiles["t1"],
         tiles_current=sentinel_tiles["t2"]
     )

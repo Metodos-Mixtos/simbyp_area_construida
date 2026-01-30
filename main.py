@@ -69,7 +69,7 @@ def main(anio: int, mes: int):
 
     # === 4. Mapas Sentinel ===
     try:
-        map_html = generate_maps(AOI_PATH, last_day_prev, last_day_curr, dirs, month_str, previous_month_str, SAC_PATH, RESERVA_PATH, EEP_PATH)
+        map_html = generate_maps(AOI_PATH, last_day_prev, last_day_curr, dirs, month_str, previous_month_str, anio, SAC_PATH, RESERVA_PATH, EEP_PATH)
         print(f"✅ Mapa generado: {map_html}")
         if map_html and os.path.exists(map_html):
             print("Map file exists locally")
