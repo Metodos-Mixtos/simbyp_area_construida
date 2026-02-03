@@ -1,7 +1,10 @@
-os
-ee
-dotenv
+earthengine-api
+python-dotenv
 geemap
 geopandas
 shapely
 gcsfs
+pandas
+rasterio
+folium
+google-cloud-storage

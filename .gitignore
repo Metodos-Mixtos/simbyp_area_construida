@@ -1,0 +1,30 @@
+# Environment & Credentials
+.env
+*.json
+!package*.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+.venv/
+
+# Output Files
+outputs/
+*.tif
+*.tiff
+*.geojson
+*.shp
+*.shx
+*.dbf
+*.csv
+*.pdf
+*.html
+*.png
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
