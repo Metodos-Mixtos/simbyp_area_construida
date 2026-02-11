@@ -4,6 +4,8 @@ import json
 import os
 import ee
 import pandas as pd
+import requests
+from pathlib import Path
 from src.config import GOOGLE_CLOUD_PROJECT
 
 def sanitize_gdf(gdf):
@@ -92,7 +94,81 @@ def get_tiles_from_ee(
         "t1": get_tile_url(end_t1),
         "t2": get_tile_url(end_t2)
     }
-def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path=None, tiles_before=None, tiles_current=None):
+
+def export_sentinel_as_png(
+    aoi_path: str,
+    end_t1: str,
+    end_t2: str,
+    output_dir: str,
+    lookback_days: int = 365,
+    max_pixels: int = 1e8
+):
+    """
+    Exporta imágenes Sentinel como PNG estáticos para evitar que expiren.
+    Retorna las rutas locales a los archivos PNG.
+    """
+    ee.Initialize(project=GOOGLE_CLOUD_PROJECT)
+
+    aoi = gpd.read_file(aoi_path)
+    minx, miny, maxx, maxy = aoi.total_bounds
+    geom = ee.Geometry.BBox(minx, miny, maxx, maxy)
+    
+    # Calcular dimensiones aproximadas basadas en el AOI
+    # Asumiendo ~10m por pixel de Sentinel
+    width_km = (maxx - minx) * 111  # aprox km
+    height_km = (maxy - miny) * 111
+    dimensions = min(int(width_km * 100), int(height_km * 100), 2048)  # max 2048px
+
+    col_id = "COPERNICUS/S2_SR_HARMONIZED"
+    vis = {"min": 0, "max": 3000, "bands": ["B4", "B3", "B2"], "gamma": 1.1}
+    sel = ["B4", "B3", "B2"]
+
+    def export_image(end, filename):
+        end_ee = ee.Date(end)
+        start_ee = end_ee.advance(-lookback_days, "day")
+
+        collection = (
+            ee.ImageCollection(col_id)
+            .filterDate(start_ee, end_ee)
+            .filterBounds(geom)
+            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
+            .select(sel)
+            .sort("system:time_start", False)
+            .sort("system:index")
+        )
+
+        image = collection.mosaic().clip(geom)
+        
+        # Obtener URL del thumbnail
+        url = image.getThumbURL({
+            'region': geom,
+            'dimensions': dimensions,
+            'format': 'png',
+            **vis
+        })
+        
+        # Descargar PNG
+        output_path = os.path.join(output_dir, filename)
+        response = requests.get(url, timeout=300)
+        response.raise_for_status()
+        
+        with open(output_path, 'wb') as f:
+            f.write(response.content)
+        
+        print(f"✅ Imagen exportada: {output_path}")
+        return output_path
+
+    png_t1 = export_image(end_t1, f"sentinel_{end_t1}_t1.png")
+    png_t2 = export_image(end_t2, f"sentinel_{end_t2}_t2.png")
+    
+    # Retornar bounds para usar en folium
+    return {
+        "t1_path": png_t1,
+        "t2_path": png_t2,
+        "bounds": [[miny, minx], [maxy, maxx]]
+    }
+
+def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path=None, tiles_before=None, tiles_current=None, png_images=None):
     
     """Generar mapa interactivo de expansión urbana con folium."""
 
@@ -119,19 +195,40 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     minx, miny, maxx, maxy = gdf_aoi.total_bounds
     bounds = [[miny, minx], [maxy, maxx]]
     
-    # Capas Sentinel RGB (ajustadas con límites dinámicos)
-    folium.TileLayer(
-        tiles=tiles_before,
-        name=f"Sentinel-2 {previous_month_str} {year}",
-        attr="Sentinel-2 EE Mosaic",
-        overlay=True,
-        show=True
-    ).add_to(m)
+    # Capas Sentinel RGB - usar PNG local si está disponible, sino tiles dinámicos
+    if png_images:
+        # Usar imágenes PNG locales
+        folium.raster_layers.ImageOverlay(
+            image=png_images["t1_path"],
+            bounds=png_images["bounds"],
+            name=f"Sentinel-2 {previous_month_str} {year}",
+            opacity=1.0,
+            overlay=True,
+            show=True
+        ).add_to(m)
 
-    folium.TileLayer(
-        tiles=tiles_current,
-        name=f"Sentinel-2 {month_str} {year}",
-        attr="Sentinel-2 EE Mosaic",
+        folium.raster_layers.ImageOverlay(
+            image=png_images["t2_path"],
+            bounds=png_images["bounds"],
+            name=f"Sentinel-2 {month_str} {year}",
+            opacity=1.0,
+            overlay=True,
+            show=False
+        ).add_to(m)
+    elif tiles_before and tiles_current:
+        # Usar tiles dinámicos de EE
+        folium.TileLayer(
+            tiles=tiles_before,
+            name=f"Sentinel-2 {previous_month_str} {year}",
+            attr="Sentinel-2 EE Mosaic",
+            overlay=True,
+            show=True
+        ).add_to(m)
+
+        folium.TileLayer(
+            tiles=tiles_current,
+            name=f"Sentinel-2 {month_str} {year}",
+            attr="Sentinel-2 EE Mosaic",
         overlay=True,
         show=False
     ).add_to(m)
@@ -163,12 +260,13 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     m.save(output_path)
     
 def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, year, sac, reserva, eep):
-    """Genera mosaicos Sentinel y mapa interactivo"""
-    sentinel_tiles = get_tiles_from_ee(
+    """Genera mosaicos Sentinel y mapa interactivo usando PNG estáticos"""
+    # Exportar imágenes Sentinel como PNG
+    png_images = export_sentinel_as_png(
         aoi_path=aoi_path,
-        end_t1=bounds_prev,
-        end_t2=bounds_curr,
-        dataset="SENTINEL",
+        end_t1=bounds_prev.strftime("%Y-%m-%d"),
+        end_t2=bounds_curr.strftime("%Y-%m-%d"),
+        output_dir=dirs["maps"],
         lookback_days=365
     )
 
@@ -183,7 +281,6 @@ def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_
         month_str=month_str, 
         previous_month_str=previous_month_str,
         year=year,
-        tiles_before=sentinel_tiles["t1"],
-        tiles_current=sentinel_tiles["t2"]
+        png_images=png_images
     )
     return map_html
