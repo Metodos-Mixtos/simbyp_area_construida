@@ -36,7 +36,11 @@ def main(anio: int, mes: int):
         raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set. Please add it to your .env file.")
     
     month_str = datetime(anio, mes, 1).strftime("%B").capitalize()
-    previous_month_str = datetime(anio, mes-1, 1).strftime("%B").capitalize()
+    # Handle January wraparound to previous year's December
+    if mes == 1:
+        previous_month_str = datetime(anio - 1, 12, 1).strftime("%B").capitalize()
+    else:
+        previous_month_str = datetime(anio, mes - 1, 1).strftime("%B").capitalize()
     print(f"🗓️ Ejecutando análisis para {month_str} {anio}")
 
     # === Fechas ===

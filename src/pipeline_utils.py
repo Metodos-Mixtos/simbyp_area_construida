@@ -94,5 +94,7 @@ def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_p
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-    render(Path("urban_sprawl/reporte/report_template.html"), Path(json_path), Path(html_path))
+    # Use absolute path to template based on this file's location
+    template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "reporte", "report_template.html")
+    render(Path(template_path), Path(json_path), Path(html_path))
     print(f"✅ Reporte generado: {html_path}")
