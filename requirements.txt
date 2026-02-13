@@ -1,6 +1,7 @@
 earthengine-api
 python-dotenv
 geemap
+geedim
 geopandas
 shapely
 gcsfs

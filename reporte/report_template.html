@@ -35,6 +35,21 @@
     <h1>Reporte mensual de expansión urbana en Bogotá</h1>
     <div class="note">{{FECHA_REPORTE}}</div> 
 
+    <h2>Resumen</h2>
+    A continuación, se muestran las cinco Unidades de Planeamiento Local (UPLs) con mayor aumento del área construida en áreas con restricciones para la construcción, el periodo seleccionado. 
+    <table>
+      <tr><th>UPL</th><th>Nueva área construida en áreas no permitidas (ha)</th><th>Nueva área construida estricta en áreas no permitidas (ha)</th><th>Total de nueva área construida (ha)</th></tr>
+      {{#TOP_UPLS}}
+      <tr><td>{{UPL}}</td><td>{{INTER_HA}}</td><td>{{INTER_HA_STRICT}}</td><td>{{TOTAL_HA}}</td></tr>
+      {{/TOP_UPLS}}
+    </table>
+
+    <section id="mapa">
+    <h2>Mapa interactivo</h2>
+    <iframe src="https://storage.googleapis.com/reportes-simbyp/urban_sprawl/{{year}}_{{mes_num}}/maps/map_expansion.html" width="100%" height="600px" frameborder="0"></iframe>
+    <p style="font-size:12px; color:#555; margin-top:8px;">{{FUENTE}}</p>
+    </section>
+
     <div class="card">
       <h2>Metodología</h2>
       <p>Para la detección de expansión urbana se utilizó el enfoque de detección de cambio de coberturas usando bandas de probabilidad, basado en el conjunto de datos Dynamic World de Google Earth Engine. Este conjunto de datos proporciona, para cada píxel y fecha, las probabilidades de pertenecer a diferentes clases de cobertura, entre ellas la clase <strong>área construida</strong>. Se generaron dos mosaicos anuales con fecha de corte al final de cada mes: una correspondiente al periodo "antes" (por ejemplo, julio de 2025) y otra al periodo "después" (por ejemplo, agosto de 2025). Estas composiciones reflejan la probabilidad de urbanización en cada píxel durante ambos periodos.</p>
@@ -54,22 +69,6 @@
 
       <div class="note">Para más información, consulte: <a href="https://developers.google.com/earth-engine/tutorials/community/introduction-to-dynamic-world-pt-3" target="_blank" rel="noopener noreferrer">Introducción a Dynamic World (parte 3).</a></div>
     </div>
-
-    <h2>Resumen</h2>
-    A continuación, se muestran las cinco Unidades de Planeamiento Local (UPLs) con mayor aumento del área construida en áreas con restricciones para la construcción, el periodo seleccionado. 
-    <table>
-      <tr><th>UPL</th><th>Nueva área construida en áreas no permitidas (ha)</th><th>Nueva área construida estricta en áreas no permitidas (ha)</th><th>Total de nueva área construida (ha)</th></tr>
-      {{#TOP_UPLS}}
-      <tr><td>{{UPL}}</td><td>{{INTER_HA}}</td><td>{{INTER_HA_STRICT}}</td><td>{{TOTAL_HA}}</td></tr>
-      {{/TOP_UPLS}}
-    </table>
-
-    <section id="mapa">
-    <h2>Mapa interactivo</h2>
-    <iframe src="https://storage.googleapis.com/reportes-simbyp/urban_sprawl/{{year}}_{{mes_num}}/maps/map_expansion.html" width="100%" height="600px" frameborder="0"></iframe>
-    <p style="font-size:12px; color:#555; margin-top:8px;">{{FUENTE}}</p>
-    </section>
-
   </div>
   
   <footer class="banner">
