@@ -75,17 +75,18 @@ def load_geometry(path):
     gdf = gpd.read_file(local_path)
     # Clean up temp file
     temp_dir = os.path.dirname(local_path)
-    if os.path.isdir(temp_dir):
+    # Only delete if it's a subdirectory within TEMP_DATA_DIR, not TEMP_DATA_DIR itself
+    if temp_dir != str(TEMP_DATA_DIR) and os.path.isdir(temp_dir):
         try:
             shutil.rmtree(temp_dir)
         except PermissionError as e:
             print(f"⚠️ No se pudo eliminar el directorio temporal {temp_dir}: {e}. Continuando...")
-    else:
-        if os.path.exists(local_path):
-            try:
-                os.unlink(local_path)
-            except PermissionError as e:
-                print(f"⚠️ No se pudo eliminar el archivo temporal {local_path}: {e}. Continuando...")
+    elif os.path.isfile(local_path):
+        # Delete individual file
+        try:
+            os.unlink(local_path)
+        except PermissionError as e:
+            print(f"⚠️ No se pudo eliminar el archivo temporal {local_path}: {e}. Continuando...")
     if len(gdf) == 0:
         raise ValueError("El archivo de geometría está vacío.")
     geom_union = gdf.unary_union
