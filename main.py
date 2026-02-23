@@ -4,6 +4,7 @@ from datetime import datetime
 import locale
 import sys
 import os
+from google.cloud import storage
 from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH
 from src.aux_utils import authenticate_gee, load_geometry, set_dates
 from src.stats_utils import calculate_expansion_areas, create_intersections
@@ -83,32 +84,15 @@ def main(anio: int, mes: int):
         print(f"❌ Error generando mapa: {e}")
         map_html = None
 
-    # === Descargar imágenes de encabezado y pie de página desde GCS ===
-    from google.cloud import storage
-
-    def download_gcs_to_local(gcs_path, local_path):
-        _, rest = gcs_path.split("gs://", 1)
-        bucket_name, blob_path = rest.split("/", 1)
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(blob_path)
-        blob.download_to_filename(local_path)
-
-    local_header1 = os.path.join(dirs["reportes"], "asi_4.png")
-    download_gcs_to_local(HEADER_IMG1_PATH, local_header1)
-    local_header2 = os.path.join(dirs["reportes"], "bogota_4.png")
-    download_gcs_to_local(HEADER_IMG2_PATH, local_header2)
-    local_footer = os.path.join(dirs["reportes"], "secre_5.png")
-    download_gcs_to_local(FOOTER_IMG_PATH, local_footer)
-
     # === 5. Reporte ===
+    # Las imágenes se usan directamente desde GCS sin descargarlas
     build_report(
         df_path=f"{dirs['stats']}/resumen_expansion_upl_ha.csv",
         strict_path=f"{dirs['stats']}/resumen_expansion_upl_ha_strict.csv",
         map_html=map_html,
-        header_img1_path=local_header1,
-        header_img2_path=local_header2,
-        footer_img_path=local_footer,
+        header_img1_path=HEADER_IMG1_PATH,
+        header_img2_path=HEADER_IMG2_PATH,
+        footer_img_path=FOOTER_IMG_PATH,
         output_dir=dirs["reportes"],
         month=month_str,
         year=anio,
@@ -117,10 +101,18 @@ def main(anio: int, mes: int):
 
     # === Subir carpeta completa a GCS ===
     def upload_folder_to_gcs(local_folder, gcs_bucket, gcs_prefix):
+        # Archivos a excluir (imágenes de header/footer que ya están en GCS)
+        exclude_files = {'asi_4.png', 'bogota_4.png', 'secre_5.png'}
+        
         client = storage.Client()
         bucket = client.bucket(gcs_bucket)
         for root, dirs_files, files in os.walk(local_folder):
             for file in files:
+                # Saltar archivos excluidos
+                if file in exclude_files:
+                    print(f"⏭️ Omitiendo {file} (ya está en GCS)")
+                    continue
+                    
                 local_path = os.path.join(root, file)
                 relative_path = os.path.relpath(local_path, local_folder)
                 gcs_path = os.path.join(gcs_prefix, relative_path).replace("\\", "/")

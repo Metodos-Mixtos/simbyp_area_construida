@@ -6,7 +6,7 @@ import shutil
 from shapely.geometry import shape
 from rasterio.features import shapes
 from pathlib import Path
-from src.aux_utils import download_gcs_to_temp
+from src.aux_utils import download_gcs_to_temp, TEMP_DATA_DIR
 
 def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output_dir):
     """
@@ -54,34 +54,17 @@ def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output
     for p, lp in [(sac_path, sac_local), (reserva_path, res_local), (eep_path, eep_local)]:
         if str(p).startswith("gs://"):
             temp_dir = os.path.dirname(lp)
-            if os.path.isdir(temp_dir):
+            # Only delete if it's a subdirectory within TEMP_DATA_DIR, not TEMP_DATA_DIR itself
+            if temp_dir != str(TEMP_DATA_DIR) and os.path.isdir(temp_dir):
                 try:
                     shutil.rmtree(temp_dir)
                 except PermissionError as e:
                     print(f"⚠️ No se pudo eliminar el directorio temporal {temp_dir}: {e}. Continuando...")
-            else:
-                if os.path.exists(lp):
-                    try:
-                        os.unlink(lp)
-                    except PermissionError as e:
-                        print(f"⚠️ No se pudo eliminar el archivo temporal {lp}: {e}. Continuando...")
-
-    # Clean up temp files
-    # Clean up temp files
-    for p, lp in [(sac_path, sac_local), (reserva_path, res_local), (eep_path, eep_local)]:
-        if str(p).startswith("gs://"):
-            temp_dir = os.path.dirname(lp)
-            if os.path.isdir(temp_dir):
+            elif os.path.isfile(lp):
                 try:
-                    shutil.rmtree(temp_dir)
-                except PermissionError as e:
-                    print(f"⚠️ No se pudo eliminar el directorio temporal {temp_dir}: {e}. Continuando...")
-            else:
-                if os.path.exists(lp):
-                    try:
-                        os.unlink(lp)
-                    except (PermissionError, OSError) as e:
-                        print(f"⚠️ No se pudo eliminar el archivo temporal {lp}: {e}. Continuando...")
+                    os.unlink(lp)
+                except (PermissionError, OSError) as e:
+                    print(f"⚠️ No se pudo eliminar el archivo temporal {lp}: {e}. Continuando...")
 
     gdf_inter = pd.concat([
         gpd.overlay(gdf_newurban, gdf_sac, how="intersection"),
@@ -119,17 +102,17 @@ def calculate_expansion_areas(input_dir, output_dir, upl_path, prefix="", file_s
     # Clean up temp file
     if str(upl_path).startswith("gs://"):
         temp_dir = os.path.dirname(upl_local)
-        if os.path.isdir(temp_dir):
+        # Only delete if it's a subdirectory within TEMP_DATA_DIR, not TEMP_DATA_DIR itself
+        if temp_dir != str(TEMP_DATA_DIR) and os.path.isdir(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
             except PermissionError as e:
                 print(f"⚠️ No se pudo eliminar el directorio temporal {temp_dir}: {e}. Continuando...")
-        else:
-            if os.path.exists(upl_local):
-                try:
-                    os.unlink(upl_local)
-                except (PermissionError, OSError) as e:
-                    print(f"⚠️ No se pudo eliminar el archivo temporal {upl_local}: {e}. Continuando...")
+        elif os.path.isfile(upl_local):
+            try:
+                os.unlink(upl_local)
+            except (PermissionError, OSError) as e:
+                print(f"⚠️ No se pudo eliminar el archivo temporal {upl_local}: {e}. Continuando...")
 
     inter_upl = gpd.overlay(gdf_upl, gdf_inter, how="intersection")
     nointer_upl = gpd.overlay(gdf_upl, gdf_no, how="intersection")

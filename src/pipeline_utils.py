@@ -52,6 +52,41 @@ def process_dynamic_world(geometry, output_dir, last_day_prev, last_day_curr):
     return paths
 
 
+def gcs_to_base64_data_uri(gcs_path):
+    """Convierte una imagen de GCS a data URI en Base64 para embeber en HTML"""
+    import base64
+    from google.cloud import storage
+    
+    if gcs_path.startswith("gs://"):
+        # Descargar imagen desde GCS
+        path_without_prefix = gcs_path[5:]
+        parts = path_without_prefix.split('/', 1)
+        bucket_name = parts[0]
+        blob_path = parts[1] if len(parts) > 1 else ''
+        
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+        
+        # Descargar como bytes
+        image_bytes = blob.download_as_bytes()
+        
+        # Convertir a Base64
+        base64_encoded = base64.b64encode(image_bytes).decode('utf-8')
+        
+        # Determinar el tipo MIME basado en la extensión
+        if blob_path.lower().endswith('.png'):
+            mime_type = 'image/png'
+        elif blob_path.lower().endswith(('.jpg', '.jpeg')):
+            mime_type = 'image/jpeg'
+        else:
+            mime_type = 'image/png'  # Default
+        
+        # Retornar data URI
+        return f"data:{mime_type};base64,{base64_encoded}"
+    
+    return gcs_path
+
 def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_path, footer_img_path, output_dir, month, year, mes_num):
     """Genera reporte final en JSON y HTML"""
     df = pd.read_csv(df_path)
@@ -77,9 +112,9 @@ def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_p
     data = {
         "TITULO": "Reporte de expansión urbana en Bogotá",
         "FECHA_REPORTE": f"{month.capitalize()} {year}",
-        "HEADER_IMG1": make_relative_path(header_img1_path, base_dir),
-        "HEADER_IMG2": make_relative_path(header_img2_path, base_dir),
-        "FOOTER_IMG": make_relative_path(footer_img_path, base_dir),
+        "HEADER_IMG1": gcs_to_base64_data_uri(header_img1_path),
+        "HEADER_IMG2": gcs_to_base64_data_uri(header_img2_path),
+        "FOOTER_IMG": gcs_to_base64_data_uri(footer_img_path),
         "TOP_UPLS": top_upls,
         "month": month,
         "year": year,
@@ -87,6 +122,7 @@ def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_p
         "mes_num": f"{mes_num:02d}",
         "FUENTE": "Dynamic World, Google Earth Engine"
     }
+
 
     json_path = os.path.join(output_dir, "urban_sprawl_reporte.json")
     html_path = os.path.join(output_dir, f"urban_sprawl_reporte_{year}_{month}.html")
