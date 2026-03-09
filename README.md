@@ -96,3 +96,142 @@ El script genera las siguientes salidas en `BASE_PATH/urban_sprawl/outputs/YYYY_
 - Usar service accounts con permisos mínimos necesarios
 - Rotar credenciales regularmente
 
+## Despliegue en Google Cloud Run
+
+Este proyecto está configurado para desplegarse como un Cloud Run Job en Google Cloud Platform.
+
+### Requisitos Previos
+
+- Google Cloud CLI (`gcloud`) instalado
+- Docker instalado
+- Proyecto de GCP con APIs habilitadas (Cloud Run, Cloud Build, Container Registry)
+- Credenciales de Google Cloud con permisos adecuados
+
+### Despliegue Rápido
+
+```bash
+chmod +x deploy.sh
+./deploy.sh your-gcp-project us-central1
+```
+
+El script automáticamente:
+1. Construye la imagen Docker
+2. La sube a Google Container Registry
+3. Crea un Cloud Run Job
+
+### Ejecutar el Job
+
+```bash
+# Con parámetros por defecto (2025-03)
+gcloud run jobs execute simbyp-analysis --region us-central1
+
+# Con parámetros personalizados
+gcloud run jobs execute simbyp-analysis --region us-central1 -- --anio 2025 --mes 4
+```
+
+### Configuración Manual
+
+Si prefieres hacer el despliegue manualmente:
+
+```bash
+# Establecer proyecto
+gcloud config set project your-gcp-project
+
+# Habilitar APIs necesarias
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com containerregistry.googleapis.com
+
+# Construir imagen
+docker build -t gcr.io/your-gcp-project/simbyp-analysis:latest .
+
+# Empujar a Container Registry
+docker push gcr.io/your-gcp-project/simbyp-analysis:latest
+
+# Crear Cloud Run Job
+gcloud run jobs create simbyp-analysis \
+  --image gcr.io/your-gcp-project/simbyp-analysis:latest \
+  --region us-central1 \
+  --memory 4Gi \
+  --cpu 2 \
+  --task-timeout 3600s
+```
+
+### Archivos de Despliegue
+
+- **Dockerfile** - Imagen Docker del proyecto
+- **.dockerignore** - Archivos excluidos de la imagen
+- **cloudbuild.yaml** - Configuración de Cloud Build para CI/CD
+- **deploy.sh** - Script de despliegue automatizado
+
+## Desarrollo Local
+
+### Configuración del Entorno
+
+```bash
+# Crear entorno virtual
+python -m venv .venv
+
+# Activar entorno
+source .venv/bin/activate  # En macOS/Linux
+# o
+.venv\Scripts\activate  # En Windows
+
+# Instalar dependencias
+pip install -r requirements.txt
+```
+
+### Ejecutar Localmente
+
+```bash
+# Configurar variables de entorno
+cp .env.example .env
+# Editar .env con tus credenciales
+
+# Ejecutar análisis
+python main.py --anio 2025 --mes 3
+```
+
+## Solución de Problemas
+
+### Error de autenticación con Earth Engine
+
+```bash
+# Autenticar con Google Cloud
+gcloud auth application-default login
+
+# Autenticar con Earth Engine
+earthengine authenticate
+```
+
+### Timeout en Cloud Run
+
+Aumenta los recursos del job:
+
+```bash
+gcloud run jobs update simbyp-analysis \
+  --region us-central1 \
+  --memory 8Gi \
+  --task-timeout 7200s
+```
+
+### Problemas con dependencias geoespaciales
+
+Asegúrate de que el Dockerfile instala todas las dependencias del sistema necesarias (GDAL, GEOS, PROJ).
+
+## Contribución
+
+Para contribuir al proyecto:
+
+1. Fork el repositorio
+2. Crea una rama con tu feature (`git checkout -b feature/AmazingFeature`)
+3. Commit tus cambios (`git commit -m 'Add AmazingFeature'`)
+4. Push a la rama (`git push origin feature/AmazingFeature`)
+5. Abre un Pull Request
+
+## Licencia
+
+Este proyecto está bajo la licencia MIT. Ver `LICENSE` para más detalles.
+
+## Contacto
+
+Para preguntas o soporte, contacta a través de las issues del repositorio.
+

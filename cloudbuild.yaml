@@ -1,0 +1,19 @@
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/simbyp-area-construida:latest'
+      - '.'
+
+  # Push the image to Google Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/simbyp-area-construida:latest'
+
+images:
+  - 'gcr.io/$PROJECT_ID/simbyp-area-construida:latest'
+
+timeout: 1800s
