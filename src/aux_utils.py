@@ -7,9 +7,13 @@ from pathlib import Path
 from shapely.geometry import Polygon, MultiPolygon
 from datetime import datetime
 from google.cloud import storage
+from google.auth import _helpers
+from google.auth.transport.requests import Request
+from google.oauth2 import service_account
 from google.api_core.exceptions import NotFound
 import tempfile
 import shutil
+import json
 
 # Temp data directory
 TEMP_DATA_DIR = Path(__file__).parent.parent.parent / "temp_data"
@@ -55,17 +59,69 @@ def download_gcs_to_temp(path):
         return tmp_path
 
 def authenticate_gee(project=None):
+    """Autenticar con Google Earth Engine usando credenciales de cuenta de servicio."""
     if not project:
         raise ValueError("GOOGLE_CLOUD_PROJECT not set. Please check your .env file or environment variables.")
-    try:
-        ee.Initialize(project=project)
-    except ee.EEException as e:
-        if "no project found" in str(e):
-            print("GEE not authenticated. Running ee.Authenticate()...")
-            ee.Authenticate()
+    
+    # Get credentials path from environment variable
+    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    
+    if credentials_path and os.path.exists(credentials_path):
+        try:
+            print(f"🔐 Autenticando con Earth Engine usando credenciales de servicio...")
+            print(f"   Archivo de credenciales: {credentials_path}")
+            print(f"   Proyecto: {project}")
+            
+            # Load service account credentials
+            with open(credentials_path) as f:
+                credentials_dict = json.load(f)
+            
+            # Create credentials from service account
+            credentials = service_account.Credentials.from_service_account_info(
+                credentials_dict,
+                scopes=[
+                    'https://www.googleapis.com/auth/cloud-platform',
+                    'https://www.googleapis.com/auth/earthengine'
+                ]
+            )
+            
+            # Initialize Earth Engine with service account credentials
+            ee.Initialize(
+                credentials=credentials,
+                project=project,
+                opt_url='https://earthengine-highvolume.googleapis.com'
+            )
+            print("✅ Autenticación exitosa con Earth Engine")
+            
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Archivo de credenciales no encontrado: {credentials_path}")
+        except json.JSONDecodeError:
+            raise ValueError(f"Archivo de credenciales inválido (no es JSON válido): {credentials_path}")
+        except Exception as e:
+            print(f"⚠️ Error con autenticación de servicio: {e}")
+            print("Intentando autenticación alternativa...")
+            try:
+                ee.Initialize(project=project)
+            except Exception as init_error:
+                raise RuntimeError(
+                    f"No se pudo autenticar con Earth Engine.\n"
+                    f"Error de servicio: {e}\n"
+                    f"Error de inicialización: {init_error}\n"
+                    f"Por favor verifica que GOOGLE_APPLICATION_CREDENTIALS apunta a un archivo JSON válido."
+                )
+    else:
+        # No credentials file, try default authentication
+        print("⚠️ GOOGLE_APPLICATION_CREDENTIALS no configurado o archivo no existe")
+        print("   Intentando autenticación por defecto...")
+        try:
             ee.Initialize(project=project)
-        else:
-            raise e
+            print("✅ Autenticación por defecto exitosa")
+        except ee.EEException as e:
+            raise RuntimeError(
+                f"No se pudo autenticar con Earth Engine.\n"
+                f"Error: {e}\n"
+                f"Por favor configura GOOGLE_APPLICATION_CREDENTIALS en tu archivo .env"
+            )
 
 def load_geometry(path):
     """Cargar geometría desde un archivo vectorial en GCS y convertir a ee.Geometry."""

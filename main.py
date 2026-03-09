@@ -5,24 +5,33 @@ import locale
 import sys
 import os
 from google.cloud import storage
+import warnings
+import dotenv
+
+# Load environment variables FIRST, before any other imports that depend on them
+dotenv.load_dotenv()
+
+# Set GOOGLE_APPLICATION_CREDENTIALS if specified in .env
+credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+if credentials_path:
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+    # Verify the credentials file exists
+    if os.path.exists(credentials_path):
+        print(f"✓ Archivo de credenciales encontrado: {credentials_path}")
+    else:
+        print(f"✗ ADVERTENCIA: Archivo de credenciales no encontrado: {credentials_path}")
+        print(f"  Por favor verifica la ruta en tu archivo .env")
+        sys.exit(1)
+
 from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH
 from src.aux_utils import authenticate_gee, load_geometry, set_dates
 from src.stats_utils import calculate_expansion_areas, create_intersections
-from src.pipeline_utils import prepare_folders, process_dynamic_world,build_report 
-from src.maps_utils import generate_maps  
-import warnings
+from src.pipeline_utils import prepare_folders, process_dynamic_world, build_report 
+from src.maps_utils import generate_maps
 
-import dotenv
-dotenv.load_dotenv()
-
-# Suppress urllib3 SSL warning
+# Suppress warnings
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL 1.1.1+")
-
-# Suppress pkg_resources warning
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API")
-
-#Authenticate with Google Cloud
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
 # === Configurar idioma español para nombres de meses ===
 try:
