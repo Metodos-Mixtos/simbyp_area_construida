@@ -138,8 +138,20 @@ def main(anio: int, mes: int):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pipeline de expansión urbana mensual (mosaico 1 año atrás)")
-    parser.add_argument("--anio", type=int, required=True, help="Año en formato YYYY")
-    parser.add_argument("--mes", type=int, required=True, help="Mes en formato numérico (1–12)")
+    
+    # Calculate default values: previous month and current year
+    today = datetime.now()
+    if today.month == 1:
+        default_year = today.year - 1
+        default_month = 12
+    else:
+        default_year = today.year
+        default_month = today.month - 1
+    
+    parser.add_argument("--anio", type=int, default=default_year, 
+                        help=f"Año en formato YYYY (default: {default_year})")
+    parser.add_argument("--mes", type=int, default=default_month, 
+                        help=f"Mes en formato numérico 1-12 (default: {default_month})")
     args = parser.parse_args()
 
     main(args.anio, args.mes)
