@@ -8,6 +8,60 @@ import requests
 from pathlib import Path
 from src.config import GOOGLE_CLOUD_PROJECT
 
+def _ensure_ee_initialized():
+    """
+    Asegurar que Earth Engine esté inicializado con credenciales de servicio.
+    Si ya está inicializado, no hacer nada.
+    Si no, intentar inicializar con credenciales de servicio.
+    Esto es crítico para funciones que usan Earth Engine como generar mapas.
+    """
+    try:
+        # Intentar hacer una pequeña operación con ee para verificar autenticación
+        ee.Date("2020-01-01").format().getInfo()
+        # Si llegamos aquí, ya está autenticado
+        return
+    except Exception as auth_error:
+        # No está autenticado o la autenticación falló, intentar inicializar
+        credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        
+        if credentials_path and os.path.exists(credentials_path):
+            try:
+                from google.oauth2 import service_account
+                
+                with open(credentials_path) as f:
+                    credentials_dict = json.load(f)
+                
+                credentials = service_account.Credentials.from_service_account_info(
+                    credentials_dict,
+                    scopes=[
+                        'https://www.googleapis.com/auth/cloud-platform',
+                        'https://www.googleapis.com/auth/earthengine'
+                    ]
+                )
+                
+                # Reset and initialize ee with credentials
+                ee.Reset()
+                ee.Initialize(
+                    credentials=credentials,
+                    project=GOOGLE_CLOUD_PROJECT,
+                    opt_url='https://earthengine-highvolume.googleapis.com'
+                )
+                print("🔐 Earth Engine reautenticado con credenciales de servicio (maps_utils)")
+                return
+            except Exception as e:
+                raise RuntimeError(
+                    f"No se pudo autenticar Earth Engine en maps_utils.\n"
+                    f"Error inicial: {auth_error}\n"
+                    f"Error de credenciales: {e}\n"
+                    f"Credenciales: {credentials_path}"
+                )
+        else:
+            raise RuntimeError(
+                f"No se pudo autenticar Earth Engine.\n"
+                f"Error: {auth_error}\n"
+                f"GOOGLE_APPLICATION_CREDENTIALS no configurado correctamente: {credentials_path}"
+            )
+
 def sanitize_gdf(gdf):
     """Sanitizar GeoDataFrame para evitar problemas al exportar a GeoJSON."""
     for col in gdf.columns:
@@ -30,7 +84,7 @@ def get_tiles_from_ee(
     Devuelve URLs de tiles (T1 y T2) desde Google Earth Engine para Sentinel o Dynamic World.
     Ambos usan lookback_days para tomar la imagen más reciente antes de cada fecha final.
     """
-    ee.Initialize(project=GOOGLE_CLOUD_PROJECT)
+    _ensure_ee_initialized()
 
     aoi = gpd.read_file(aoi_path)
     minx, miny, maxx, maxy = aoi.total_bounds
@@ -107,7 +161,7 @@ def export_sentinel_as_png(
     Exporta imágenes Sentinel como PNG estáticos para evitar que expiren.
     Retorna las rutas locales a los archivos PNG.
     """
-    ee.Initialize(project=GOOGLE_CLOUD_PROJECT)
+    _ensure_ee_initialized()
 
     aoi = gpd.read_file(aoi_path)
     minx, miny, maxx, maxy = aoi.total_bounds
