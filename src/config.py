@@ -13,5 +13,5 @@ HEADER_IMG1_PATH = os.getenv("HEADER_IMG1_PATH", "gs://material-estatico-sdp/SIM
 HEADER_IMG2_PATH = os.getenv("HEADER_IMG2_PATH", "gs://material-estatico-sdp/SIMBYP_DATA/SDP Logos/bogota_4.png")  
 FOOTER_IMG_PATH = os.getenv("FOOTER_IMG_PATH", "gs://material-estatico-sdp/SIMBYP_DATA/SDP Logos/secre_5.png")  
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
-BASE_PATH = os.getenv("BASE_PATH", "/tmp/urban_sprawl")  # For local fallbacks
+BASE_PATH = os.getenv("BASE_PATH") 
 
