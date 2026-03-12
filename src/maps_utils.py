@@ -149,36 +149,124 @@ def get_tiles_from_ee(
         "t2": get_tile_url(end_t2)
     }
 
+def create_grid(minx, miny, maxx, maxy, n_tiles=4):
+    """
+    Divide el AOI en una cuadrícula de n_tiles x n_tiles.
+    Retorna lista de bboxes [(minx, miny, maxx, maxy), ...]
+    """
+    width = (maxx - minx) / n_tiles
+    height = (maxy - miny) / n_tiles
+    
+    tiles = []
+    for i in range(n_tiles):
+        for j in range(n_tiles):
+            tile_minx = minx + i * width
+            tile_miny = miny + j * height
+            tile_maxx = tile_minx + width
+            tile_maxy = tile_miny + height
+            tiles.append((tile_minx, tile_miny, tile_maxx, tile_maxy))
+    
+    return tiles
+
 def export_sentinel_as_png(
     aoi_path: str,
     end_t1: str,
     end_t2: str,
     output_dir: str,
+    intersections_dir: str = None,
     lookback_days: int = 365,
-    max_pixels: int = 1e8
+    n_tiles: int = 6
 ):
     """
-    Exporta imágenes Sentinel como PNG estáticos para evitar que expiren.
-    Retorna las rutas locales a los archivos PNG.
+    Exporta imágenes Sentinel-2 como mosaico de PNGs a 10m/píxel.
+    Divide el AOI en tiles para evitar límite de Earth Engine.
+    OPTIMIZADO: Solo descarga tiles que contienen áreas de expansión urbana.
+    
+    Args:
+        n_tiles: Número de divisiones por eje (total = n_tiles x n_tiles tiles)
+                 Por defecto 6 (36 tiles totales) para AOIs grandes
+        intersections_dir: Directorio con geometrías de expansión urbana (para filtrar tiles)
+    
+    Retorna rutas a carpetas con los tiles organizados por periodo.
     """
+    from src.aux_utils import download_gcs_to_temp
+    from shapely.geometry import box
+    from shapely.ops import unary_union
+    
     _ensure_ee_initialized()
 
-    aoi = gpd.read_file(aoi_path)
+    # Descargar AOI de GCS si es necesario
+    local_aoi_path = download_gcs_to_temp(aoi_path)
+    aoi = gpd.read_file(local_aoi_path)
     minx, miny, maxx, maxy = aoi.total_bounds
-    geom = ee.Geometry.BBox(minx, miny, maxx, maxy)
     
-    # Calcular dimensiones aproximadas basadas en el AOI
-    # Asumiendo ~10m por pixel de Sentinel
-    width_km = (maxx - minx) * 111  # aprox km
-    height_km = (maxy - miny) * 111
-    dimensions = min(int(width_km * 100), int(height_km * 100), 2048)  # max 2048px
+    # Crear cuadrícula de tiles completa
+    all_tiles = create_grid(minx, miny, maxx, maxy, n_tiles=n_tiles)
+    
+    # Filtrar tiles que contienen expansión urbana
+    if intersections_dir:
+        expansion_geoms = []
+        normal_path = os.path.join(intersections_dir, "new_urban_intersections.geojson")
+        strict_path = os.path.join(intersections_dir, "new_urban_strict_intersections.geojson")
+        
+        if os.path.exists(normal_path):
+            gdf_normal = gpd.read_file(normal_path).to_crs(epsg=4326)
+            expansion_geoms.append(gdf_normal.unary_union)
+        
+        if os.path.exists(strict_path):
+            gdf_strict = gpd.read_file(strict_path).to_crs(epsg=4326)
+            expansion_geoms.append(gdf_strict.unary_union)
+        
+        if expansion_geoms:
+            # Combinar todas las geometrías de expansión
+            expansion_union = unary_union(expansion_geoms)
+            
+            # Filtrar tiles que intersectan con la expansión
+            tiles_with_indices = []
+            for idx, tile_bbox in enumerate(all_tiles):
+                tile_geom = box(tile_bbox[0], tile_bbox[1], tile_bbox[2], tile_bbox[3])
+                if tile_geom.intersects(expansion_union):
+                    tiles_with_indices.append((idx, tile_bbox))
+            
+            print(f"📐 AOI dividido en {len(all_tiles)} tiles ({n_tiles}x{n_tiles})")
+            print(f"✂️ Optimizado: solo {len(tiles_with_indices)} tiles contienen expansión urbana")
+        else:
+            print("⚠️ No hay geometrías de expansión, descargando todos los tiles")
+            tiles_with_indices = list(enumerate(all_tiles))
+    else:
+        tiles_with_indices = list(enumerate(all_tiles))
+        print(f"📐 AOI dividido en {len(all_tiles)} tiles ({n_tiles}x{n_tiles})")
 
     col_id = "COPERNICUS/S2_SR_HARMONIZED"
     vis = {"min": 0, "max": 3000, "bands": ["B4", "B3", "B2"], "gamma": 1.1}
     sel = ["B4", "B3", "B2"]
 
-    def export_image(end, filename):
-        end_ee = ee.Date(end)
+    # Limpiar y crear carpetas para cada periodo (elimina tiles viejos)
+    import glob
+    t1_folder = os.path.join(output_dir, f"sentinel_{end_t1}_t1")
+    t2_folder = os.path.join(output_dir, f"sentinel_{end_t2}_t2")
+    
+    # Crear carpetas si no existen
+    os.makedirs(t1_folder, exist_ok=True)
+    os.makedirs(t2_folder, exist_ok=True)
+    
+    # Eliminar solo archivos PNG antiguos (evita problemas con OneDrive)
+    for folder in [t1_folder, t2_folder]:
+        old_tiles = glob.glob(os.path.join(folder, "*.png"))
+        if old_tiles:
+            print(f"🗑️  Limpiando {len(old_tiles)} tiles antiguos en {os.path.basename(folder)}")
+            for old_tile in old_tiles:
+                try:
+                    os.remove(old_tile)
+                except Exception as e:
+                    print(f"⚠️  No se pudo eliminar {os.path.basename(old_tile)}: {e}")
+
+    def download_tile_png(end_date, tile_bbox, tile_index, output_folder):
+        """Descarga un tile individual de Sentinel a 10m/píxel."""
+        tile_minx, tile_miny, tile_maxx, tile_maxy = tile_bbox
+        geom = ee.Geometry.BBox(tile_minx, tile_miny, tile_maxx, tile_maxy)
+        
+        end_ee = ee.Date(end_date)
         start_ee = end_ee.advance(-lookback_days, "day")
 
         collection = (
@@ -193,33 +281,48 @@ def export_sentinel_as_png(
 
         image = collection.mosaic().clip(geom)
         
-        # Obtener URL del thumbnail
+        # Obtener URL con escala de 10m/píxel
         url = image.getThumbURL({
             'region': geom,
-            'dimensions': dimensions,
+            'scale': 10,
             'format': 'png',
             **vis
         })
         
         # Descargar PNG
-        output_path = os.path.join(output_dir, filename)
+        filename = f"tile_{tile_index:02d}.png"
+        output_path = os.path.join(output_folder, filename)
         response = requests.get(url, timeout=300)
         response.raise_for_status()
         
         with open(output_path, 'wb') as f:
             f.write(response.content)
         
-        print(f"✅ Imagen exportada: {output_path}")
-        return output_path
+        return output_path, (tile_miny, tile_minx, tile_maxy, tile_maxx)  # bounds para folium
 
-    png_t1 = export_image(end_t1, f"sentinel_{end_t1}_t1.png")
-    png_t2 = export_image(end_t2, f"sentinel_{end_t2}_t2.png")
+    # Descargar solo los tiles filtrados para t1
+    print(f"📥 Descargando {len(tiles_with_indices)} tiles para periodo T1 ({end_t1})...")
+    t1_tiles = []
+    for i, (tile_idx, tile_bbox) in enumerate(tiles_with_indices):
+        path, bounds = download_tile_png(end_t1, tile_bbox, tile_idx, t1_folder)
+        t1_tiles.append({"path": path, "bounds": [[bounds[0], bounds[1]], [bounds[2], bounds[3]]]})
+        print(f"  ✅ Tile {i+1}/{len(tiles_with_indices)} descargado")
     
-    # Retornar bounds para usar en folium
+    # Descargar solo los tiles filtrados para t2  
+    print(f"📥 Descargando {len(tiles_with_indices)} tiles para periodo T2 ({end_t2})...")
+    t2_tiles = []
+    for i, (tile_idx, tile_bbox) in enumerate(tiles_with_indices):
+        path, bounds = download_tile_png(end_t2, tile_bbox, tile_idx, t2_folder)
+        t2_tiles.append({"path": path, "bounds": [[bounds[0], bounds[1]], [bounds[2], bounds[3]]]})
+        print(f"  ✅ Tile {i+1}/{len(tiles_with_indices)} descargado")
+    
+    print(f"✅ Mosaico optimizado: {len(tiles_with_indices)} tiles por periodo a 10m/píxel")
+    
+    # Retornar información de todos los tiles
     return {
-        "t1_path": png_t1,
-        "t2_path": png_t2,
-        "bounds": [[miny, minx], [maxy, maxx]]
+        "t1_tiles": t1_tiles,
+        "t2_tiles": t2_tiles,
+        "bounds": [[miny, minx], [maxy, maxx]]  # bounds completos del AOI
     }
 
 def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path=None, tiles_before=None, tiles_current=None, png_images=None):
@@ -249,26 +352,46 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     minx, miny, maxx, maxy = gdf_aoi.total_bounds
     bounds = [[miny, minx], [maxy, maxx]]
     
-    # Capas Sentinel RGB - usar PNG local si está disponible, sino tiles dinámicos
-    if png_images:
-        # Usar imágenes PNG locales
-        folium.raster_layers.ImageOverlay(
-            image=png_images["t1_path"],
-            bounds=png_images["bounds"],
-            name=f"Sentinel-2 {previous_month_str} {year}",
-            opacity=1.0,
-            overlay=True,
-            show=True
-        ).add_to(m)
-
-        folium.raster_layers.ImageOverlay(
-            image=png_images["t2_path"],
-            bounds=png_images["bounds"],
-            name=f"Sentinel-2 {month_str} {year}",
-            opacity=1.0,
-            overlay=True,
-            show=False
-        ).add_to(m)
+    # Capas Sentinel RGB - usar mosaico de tiles PNG si está disponible
+    if png_images and "t1_tiles" in png_images:
+        # Usar rutas ABSOLUTAS para que Folium pueda encontrar los archivos
+        # Luego haremos post-procesamiento del HTML para convertirlas a relativas
+        output_dir = os.path.dirname(output_path)
+        
+        # === PERIODO T1 (mes anterior) - Añadir todos los tiles ===
+        t1_group = folium.FeatureGroup(name=f"Sentinel-2 {previous_month_str} {year}", show=True)
+        
+        for tile in png_images["t1_tiles"]:
+            # Usar ruta ABSOLUTA (Folium las embebe como base64 por defecto, pero las necesita para leerlas)
+            folium.raster_layers.ImageOverlay(
+                image=tile["path"],
+                bounds=tile["bounds"],
+                opacity=1.0,
+                interactive=False,
+                cross_origin=False,
+                zindex=1
+            ).add_to(t1_group)
+        
+        t1_group.add_to(m)
+        
+        # === PERIODO T2 (mes actual) - Añadir todos los tiles ===
+        t2_group = folium.FeatureGroup(name=f"Sentinel-2 {month_str} {year}", show=False)
+        
+        for tile in png_images["t2_tiles"]:
+            # Usar ruta ABSOLUTA
+            folium.raster_layers.ImageOverlay(
+                image=tile["path"],
+                bounds=tile["bounds"],
+                opacity=1.0,
+                interactive=False,
+                cross_origin=False,
+                zindex=1
+            ).add_to(t2_group)
+        
+        t2_group.add_to(m)
+        
+        t2_group.add_to(m)
+        
     elif tiles_before and tiles_current:
         # Usar tiles dinámicos de EE
         folium.TileLayer(
@@ -292,13 +415,13 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     if os.path.exists(normal_path):
         gdf_norm = sanitize_gdf(gpd.read_file(normal_path).to_crs(epsg=4326))
         folium.GeoJson(json.loads(gdf_norm.to_json()), name="Expansión del área construida",
-                       style_function=lambda x: {"color": "orange", "weight": 1.5, "fillOpacity": 0.5}).add_to(m)
+                       style_function=lambda x: {"color": "orange", "weight": 1.5, "fillOpacity": 0.05}).add_to(m)
 
     strict_path = os.path.join(intersections_dir, "new_urban_strict_intersections.geojson")
     if os.path.exists(strict_path):
         gdf_strict = sanitize_gdf(gpd.read_file(strict_path).to_crs(epsg=4326))
         folium.GeoJson(json.loads(gdf_strict.to_json()), name="Expansión estricta del área construida",
-                       style_function=lambda x: {"color": "purple", "weight": 1.5, "fillOpacity": 0.5}).add_to(m)
+                       style_function=lambda x: {"color": "purple", "weight": 1.5, "fillOpacity": 0.05}).add_to(m)
         
     # Capas base (SAC, Reserva, EEP)
     folium.GeoJson(json.loads(gdf_sac.to_json()), name="Conflictos Socioambientales",
@@ -308,19 +431,42 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     folium.GeoJson(json.loads(gdf_eep.to_json()), name="Estructura Ecológica Principal",
                    style_function=lambda x: {"color": "#388900", "weight": 1}, show=False).add_to(m)
 
-
-    # Control de capas y guardado
+    # Control de capas
     folium.LayerControl(collapsed=False).add_to(m)
     m.save(output_path)
     
+    # Post-procesamiento: convertir rutas absolutas embebidas a rutas relativas
+    if png_images and "t1_tiles" in png_images:
+        output_dir = os.path.dirname(output_path)
+        
+        # Leer el HTML generado
+        with open(output_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        # Reemplazar rutas absolutas por relativas
+        for tile in png_images["t1_tiles"] + png_images["t2_tiles"]:
+            abs_path = tile["path"]
+            rel_path = os.path.relpath(abs_path, output_dir).replace("\\", "/")
+            
+            # Folium puede embedder como base64 o como ruta, buscar ambos patrones
+            # Patrón 1: url("file:///C:/ruta/absoluta/tile.png")
+            html_content = html_content.replace(f'file:///{abs_path.replace(chr(92), "/")}', rel_path)
+            html_content = html_content.replace(abs_path.replace("\\", "/"), rel_path)
+            html_content = html_content.replace(abs_path, rel_path)
+        
+        # Guardar el HTML modificado
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+    
 def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, year, sac, reserva, eep):
-    """Genera mosaicos Sentinel y mapa interactivo usando PNG estáticos"""
-    # Exportar imágenes Sentinel como PNG
+    """Genera mosaicos Sentinel y mapa interactivo usando PNG estáticos (optimizado)"""
+    # Exportar imágenes Sentinel como PNG (solo tiles con expansión urbana)
     png_images = export_sentinel_as_png(
         aoi_path=aoi_path,
         end_t1=bounds_prev.strftime("%Y-%m-%d"),
         end_t2=bounds_curr.strftime("%Y-%m-%d"),
         output_dir=dirs["maps"],
+        intersections_dir=dirs["intersections"],  # Pasar directorio para filtrar tiles
         lookback_days=365
     )
 

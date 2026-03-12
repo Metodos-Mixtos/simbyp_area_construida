@@ -90,6 +90,11 @@ def calculate_expansion_areas(input_dir, output_dir, upl_path, prefix="", file_s
     path_no = os.path.join(input_dir, f"{file_suffix}_no_intersections.geojson")
     path_inter = os.path.join(input_dir, f"{file_suffix}_intersections.geojson")
 
+    # Verificar si los archivos existen (pueden no existir si no hubo expansión)
+    if not os.path.exists(path_no) or not os.path.exists(path_inter):
+        print(f"⏭️ Omitiendo cálculo para {file_suffix}: archivos de intersección no existen (sin expansión detectada)")
+        return
+
     gdf_no = gpd.read_file(path_no).to_crs(crs)
     gdf_inter = gpd.read_file(path_inter).to_crs(crs)
 

@@ -24,7 +24,7 @@ if credentials_path:
         sys.exit(1)
 
 from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH
-from src.aux_utils import authenticate_gee, load_geometry, set_dates
+from src.aux_utils import authenticate_gee, load_geometry, set_dates, cleanup_temp_data
 from src.stats_utils import calculate_expansion_areas, create_intersections
 from src.pipeline_utils import prepare_folders, process_dynamic_world, build_report 
 from src.maps_utils import generate_maps
@@ -52,6 +52,10 @@ def main(anio: int, mes: int):
     else:
         previous_month_str = datetime(anio, mes - 1, 1).strftime("%B").capitalize()
     print(f"🗓️ Ejecutando análisis para {month_str} {anio}")
+
+    # === 1. Limpiar temp_data al inicio ===
+    print("\n🧹 Limpiando carpeta temporal antes de iniciar...")
+    cleanup_temp_data()
 
     # === Fechas ===
     last_day_curr, last_day_prev = set_dates(mes, anio)
@@ -134,6 +138,7 @@ def main(anio: int, mes: int):
     upload_folder_to_gcs(OUTPUT_FOLDER, "reportes-simbyp", f"urban_sprawl/{fecha_rango}")
 
     print("✅ Proceso completo. Archivos guardados en:")
+    print(f"   - Local: {OUTPUT_FOLDER}")
     print(f"   - GCS: gs://reportes-simbyp/urban_sprawl/{fecha_rango}/")
 
 if __name__ == "__main__":
