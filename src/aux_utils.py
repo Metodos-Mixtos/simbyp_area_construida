@@ -15,8 +15,8 @@ import tempfile
 import shutil
 import json
 
-# Temp data directory
-TEMP_DATA_DIR = Path(__file__).parent.parent.parent / "temp_data"
+# Temp data directory - carpeta temporal dentro del repositorio
+TEMP_DATA_DIR = Path(__file__).parent.parent / "temp_data"
 TEMP_DATA_DIR.mkdir(exist_ok=True)
 
 def download_gcs_to_temp(path):
@@ -197,3 +197,18 @@ def set_dates(mes, anio):
     last_day_prev = datetime(prev_year, prev_month, calendar.monthrange(prev_year, prev_month)[1])
     last_day_curr = datetime(anio, mes, calendar.monthrange(anio, mes)[1])
     return last_day_curr, last_day_prev
+
+def cleanup_temp_data():
+    """Limpiar todos los archivos temporales en TEMP_DATA_DIR."""
+    if TEMP_DATA_DIR.exists():
+        for item in TEMP_DATA_DIR.iterdir():
+            try:
+                if item.is_file():
+                    item.unlink()
+                    print(f"🗑️  Eliminado archivo temporal: {item.name}")
+                elif item.is_dir():
+                    shutil.rmtree(item)
+                    print(f"🗑️  Eliminado directorio temporal: {item.name}")
+            except Exception as e:
+                print(f"⚠️  No se pudo eliminar {item.name}: {e}")
+        print(f"✅ Carpeta temp_data limpiada")

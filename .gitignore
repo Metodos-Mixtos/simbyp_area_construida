@@ -40,6 +40,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Temp data
+temp_data/
+
 # IDE & Editor
 .vscode/
 .idea/
