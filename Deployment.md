@@ -211,7 +211,7 @@ spec:
 gcloud run jobs execute $JOB_NAME --region $REGION
 ```
 
-This will analyze **February 2026** (current date is March 10, 2026, so previous month = February).
+This will analyze **February 2026** (previous month by default).
 
 ### Run with Specific Month/Year
 

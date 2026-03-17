@@ -11,7 +11,17 @@ RUN apt-get update && apt-get install -y \
     libgeos-dev \
     libproj-dev \
     git \
+    locales \
     && rm -rf /var/lib/apt/lists/*
+
+# Generate Spanish locales
+RUN sed -i 's/^# es_ES.UTF-8 UTF-8$/es_ES.UTF-8 UTF-8/' /etc/locale.gen && \
+    sed -i 's/^# es_CO.UTF-8 UTF-8$/es_CO.UTF-8 UTF-8/' /etc/locale.gen && \
+    locale-gen
+
+# Set default locale
+ENV LANG=es_ES.UTF-8
+ENV LC_ALL=es_ES.UTF-8
 
 # Set GDAL environment variables
 ENV GDAL_CONFIG=/usr/bin/gdal-config
