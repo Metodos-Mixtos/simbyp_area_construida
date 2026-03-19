@@ -23,7 +23,7 @@ if credentials_path:
         print(f"  Por favor verifica la ruta en tu archivo .env")
         sys.exit(1)
 
-from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH
+from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH, GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX
 from src.aux_utils import authenticate_gee, load_geometry, set_dates, cleanup_temp_data
 from src.stats_utils import calculate_expansion_areas, create_intersections
 from src.pipeline_utils import prepare_folders, process_dynamic_world, build_report 
@@ -135,11 +135,11 @@ def main(anio: int, mes: int):
 
     print("☁️ Subiendo outputs a GCS...")
     fecha_rango = f"{anio}_{mes:02d}"
-    upload_folder_to_gcs(OUTPUT_FOLDER, "reportes-simbyp", f"urban_sprawl/{fecha_rango}")
+    upload_folder_to_gcs(OUTPUT_FOLDER, GCS_OUTPUT_BUCKET, f"{GCS_OUTPUT_PREFIX}/{fecha_rango}")
 
     print("✅ Proceso completo. Archivos guardados en:")
     print(f"   - Local: {OUTPUT_FOLDER}")
-    print(f"   - GCS: gs://reportes-simbyp/urban_sprawl/{fecha_rango}/")
+    print(f"   - GCS: gs://{GCS_OUTPUT_BUCKET}/{GCS_OUTPUT_PREFIX}/{fecha_rango}/")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pipeline de expansión urbana mensual (mosaico 1 año atrás)")

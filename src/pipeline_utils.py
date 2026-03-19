@@ -5,6 +5,7 @@ import pandas as pd
 from pathlib import Path
 
 from src.aux_utils import export_image, make_relative_path
+from src.config import GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX
 from reporte.render_report import render
 
 def get_dw_mosaic_1year(end_date, geometry):
@@ -109,16 +110,17 @@ def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_p
 
     base_dir = Path(output_dir)
     fecha_rango = f"{month}_{year}"
+    map_iframe_url = f"https://storage.googleapis.com/{GCS_OUTPUT_BUCKET}/{GCS_OUTPUT_PREFIX}/{year}_{mes_num:02d}/maps/map_expansion.html"
     data = {
         "TITULO": "Reporte de expansión urbana en Bogotá",
         "FECHA_REPORTE": f"{month.capitalize()} {year}",
         "HEADER_IMG1": gcs_to_base64_data_uri(header_img1_path),
         "HEADER_IMG2": gcs_to_base64_data_uri(header_img2_path),
         "FOOTER_IMG": gcs_to_base64_data_uri(footer_img_path),
+        "MAP_IFRAME_URL": map_iframe_url,
         "TOP_UPLS": top_upls,
         "month": month,
         "year": year,
-        "mes_num": f"{mes_num:02d}",
         "mes_num": f"{mes_num:02d}",
         "FUENTE": "Dynamic World, Google Earth Engine"
     }
