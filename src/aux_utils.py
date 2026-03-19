@@ -174,7 +174,7 @@ def export_image(image, geometry, output_path):
         filename=output_path,
         region=geometry.bounds(),
         scale=10,
-        crs="EPSG:4326"
+        crs="EPSG:4326"  # EE trabaja en WGS84, conversión a EPSG:9377 se hace después
     )
     
 def make_relative_path(path, base_dir):

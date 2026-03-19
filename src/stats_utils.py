@@ -19,6 +19,9 @@ def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output
     with rasterio.open(new_urban_tif) as src:
         data = src.read(1)
         mask = data > 0
+        num_pixels = mask.sum()
+        area_teorica_ha = (num_pixels * 100) / 10000  # 100 m² por píxel (10m × 10m)
+        print(f"   📊 {base_name}: {num_pixels} píxeles = {area_teorica_ha:.2f} ha teórico")
         results = list(shapes(data, mask=mask, transform=src.transform))
 
     # Validar si hay geometrías
@@ -136,3 +139,81 @@ def calculate_expansion_areas(input_dir, output_dir, upl_path, prefix="", file_s
     resumen.to_csv(out_csv, index=False)
     print(f"✅ Guardado: {out_csv}")
     return resumen, None
+
+
+def extract_dw_bands_from_expansion(expansion_tif, dw_all_bands_tif, output_csv):
+    """Extrae valores de todas las bandas DW para píxeles de expansión urbana.
+    
+    Args:
+        expansion_tif: Raster binario de expansión (new_urban.tif o new_urban_strict.tif)
+        dw_all_bands_tif: Raster DW con todas las bandas
+        output_csv: Ruta de salida para el CSV
+    """
+    if not os.path.exists(expansion_tif):
+        print(f"⏭️ No se encontró: {expansion_tif}")
+        return
+    
+    if not os.path.exists(dw_all_bands_tif):
+        print(f"⏭️ No se encontró: {dw_all_bands_tif}")
+        return
+    
+    # Leer expansión urbana
+    with rasterio.open(expansion_tif) as exp_src:
+        expansion_data = exp_src.read(1)
+        transform = exp_src.transform
+        rows, cols = (expansion_data > 0).nonzero()
+        
+        if len(rows) == 0:
+            print(f"⚠️ Sin píxeles de expansión en {os.path.basename(expansion_tif)}")
+            empty_df = pd.DataFrame(columns=['pixel_id', 'row', 'col', 'lon', 'lat', 
+                                            'water', 'trees', 'grass', 'flooded_vegetation', 
+                                            'crops', 'shrub_and_scrub', 'built', 'bare', 'snow_and_ice'])
+            empty_df.to_csv(output_csv, index=False)
+            return
+    
+    # Leer bandas DW
+    with rasterio.open(dw_all_bands_tif) as dw_src:
+        band_names = ["water", "trees", "grass", "flooded_vegetation", "crops", 
+                     "shrub_and_scrub", "built", "bare", "snow_and_ice"]
+        
+        records = []
+        skipped = 0
+        
+        for idx, (row, col) in enumerate(zip(rows, cols)):
+            try:
+                # Coordenadas geográficas desde raster de expansión
+                lon, lat = rasterio.transform.xy(transform, row, col, offset='center')
+                
+                # Convertir a índices del raster DW
+                dw_row, dw_col = rasterio.transform.rowcol(dw_src.transform, lon, lat)
+                
+                # Verificar límites
+                if dw_row < 0 or dw_row >= dw_src.height or dw_col < 0 or dw_col >= dw_src.width:
+                    skipped += 1
+                    continue
+                
+                pixel_values = {
+                    'pixel_id': idx + 1,
+                    'row': int(row),
+                    'col': int(col),
+                    'lon': lon,
+                    'lat': lat
+                }
+                
+                # Leer valores de cada banda
+                for band_idx, band_name in enumerate(band_names):
+                    value = dw_src.read(band_idx + 1, window=((dw_row, dw_row + 1), (dw_col, dw_col + 1)))
+                    pixel_values[band_name] = float(value[0, 0])
+                
+                records.append(pixel_values)
+            except:
+                skipped += 1
+                continue
+        
+        if skipped > 0:
+            print(f"   ⚠️ {skipped} píxeles omitidos")
+        
+        df = pd.DataFrame(records)
+        df.to_csv(output_csv, index=False)
+        print(f"✅ Extraídos {len(records)} píxeles → {output_csv}")
+        return df

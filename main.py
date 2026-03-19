@@ -4,6 +4,7 @@ from datetime import datetime
 import locale
 import sys
 import os
+import pandas as pd
 from google.cloud import storage
 import warnings
 import dotenv
@@ -25,7 +26,7 @@ if credentials_path:
 
 from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH
 from src.aux_utils import authenticate_gee, load_geometry, set_dates, cleanup_temp_data
-from src.stats_utils import calculate_expansion_areas, create_intersections
+from src.stats_utils import calculate_expansion_areas, create_intersections, extract_dw_bands_from_expansion
 from src.pipeline_utils import prepare_folders, process_dynamic_world, build_report 
 from src.maps_utils import generate_maps
 
@@ -65,6 +66,21 @@ def main(anio: int, mes: int):
     fecha_rango = f"{anio}_{mes:02d}"
     OUTPUT_FOLDER = os.path.join(BASE_PATH, "urban_sprawl", "outputs", fecha_rango)
 
+    # === Limpiar archivos existentes del mes actual ===
+    print(f"\n🗑️  Limpiando archivos existentes del mes {fecha_rango}...")
+    for subdir in ["dw", "intersections", "stats"]:
+        dir_path = dirs.get(subdir)
+        if dir_path and os.path.exists(dir_path):
+            for item in os.listdir(dir_path):
+                item_path = os.path.join(dir_path, item)
+                try:
+                    if os.path.isfile(item_path):
+                        os.unlink(item_path)
+                        print(f"   ✓ Eliminado: {item}")
+                except Exception as e:
+                    print(f"   ⚠️ No se pudo eliminar {item}: {e}")
+    print("✅ Carpeta del mes actual limpiada")
+
     # === Autenticación y carga del AOI ===
     authenticate_gee(project=GOOGLE_CLOUD_PROJECT)
     print(f"Debug: AOI_PATH = {AOI_PATH}")  # Added logging to check the path
@@ -85,6 +101,21 @@ def main(anio: int, mes: int):
     
     calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH, prefix="strict_", file_suffix="new_urban_strict")
 
+    # === 3b. Extraer valores de bandas DW por píxel ===
+    print("\n📊 Extrayendo bandas Dynamic World por píxel...")
+    
+    extract_dw_bands_from_expansion(
+        expansion_tif=dw_paths["new_urban"],
+        dw_all_bands_tif=dw_paths["dw_all_bands"],
+        output_csv=os.path.join(dirs["stats"], "expansion_dw_bands.csv")
+    )
+    
+    extract_dw_bands_from_expansion(
+        expansion_tif=dw_paths["new_urban_strict"],
+        dw_all_bands_tif=dw_paths["dw_all_bands"],
+        output_csv=os.path.join(dirs["stats"], "expansion_dw_bands_strict.csv")
+    )
+
     # === 4. Mapas Sentinel ===
     try:
         map_html = generate_maps(AOI_PATH, last_day_prev, last_day_curr, dirs, month_str, previous_month_str, anio, SAC_PATH, RESERVA_PATH, EEP_PATH)
@@ -98,10 +129,19 @@ def main(anio: int, mes: int):
         map_html = None
 
     # === 5. Reporte ===
+    # Verificar si hay datos para reportar
+    csv_normal = f"{dirs['stats']}/resumen_expansion_upl_ha.csv"
+    csv_strict = f"{dirs['stats']}/resumen_expansion_upl_ha_strict.csv"
+    
+    if not os.path.exists(csv_normal):
+        print("⚠️ No se detectó expansión urbana. Creando CSV vacío para reporte.")
+        # Crear CSV vacío con estructura correcta
+        pd.DataFrame(columns=["NOMBRE", "interseccion_ha", "no_interseccion_ha", "total_ha"]).to_csv(csv_normal, index=False)
+    
     # Las imágenes se usan directamente desde GCS sin descargarlas
     build_report(
-        df_path=f"{dirs['stats']}/resumen_expansion_upl_ha.csv",
-        strict_path=f"{dirs['stats']}/resumen_expansion_upl_ha_strict.csv",
+        df_path=csv_normal,
+        strict_path=csv_strict,
         map_html=map_html,
         header_img1_path=HEADER_IMG1_PATH,
         header_img2_path=HEADER_IMG2_PATH,
@@ -142,7 +182,7 @@ def main(anio: int, mes: int):
     print(f"   - GCS: gs://reportes-simbyp/urban_sprawl/{fecha_rango}/")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Pipeline de expansión urbana mensual (mosaico 1 año atrás)")
+    parser = argparse.ArgumentParser(description="Pipeline de expansión urbana mensual (mosaicos de 60 días mes-a-mes)")
     
     # Calculate default values: previous month and current year
     today = datetime.now()

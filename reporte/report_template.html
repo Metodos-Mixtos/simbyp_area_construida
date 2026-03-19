@@ -36,7 +36,7 @@
     <div class="note">{{FECHA_REPORTE}}</div> 
 
     <h2>Resumen</h2>
-    A continuación, se muestran las cinco Unidades de Planeamiento Local (UPLs) con mayor aumento del área construida en áreas con restricciones para la construcción, el periodo seleccionado. 
+    A continuación, se muestran las cinco Unidades de Planeamiento Local (UPLs) con mayor aumento del área construida en áreas con restricciones para la construcción durante el período analizado. 
     <table>
       <tr><th>UPL</th><th>Nueva área construida en áreas no permitidas (ha)</th><th>Nueva área construida estricta en áreas no permitidas (ha)</th><th>Total de nueva área construida (ha)</th></tr>
       {{#TOP_UPLS}}
@@ -52,7 +52,7 @@
 
     <div class="card">
       <h2>Metodología</h2>
-      <p>Para la detección de expansión urbana se utilizó el enfoque de detección de cambio de coberturas usando bandas de probabilidad, basado en el conjunto de datos Dynamic World de Google Earth Engine. Este conjunto de datos proporciona, para cada píxel y fecha, las probabilidades de pertenecer a diferentes clases de cobertura, entre ellas la clase <strong>área construida</strong>. Se generaron dos mosaicos anuales con fecha de corte al final de cada mes: una correspondiente al periodo "antes" (por ejemplo, julio de 2025) y otra al periodo "después" (por ejemplo, agosto de 2025). Estas composiciones reflejan la probabilidad de urbanización en cada píxel durante ambos periodos.</p>
+      <p>Para la detección de expansión urbana se utilizó el enfoque de detección de cambio de coberturas usando bandas de probabilidad, basado en el conjunto de datos Dynamic World de Google Earth Engine. Este conjunto de datos proporciona, para cada píxel y fecha, las probabilidades de pertenecer a diferentes clases de cobertura, entre ellas la clase <strong>área construida</strong>. Se generaron dos mosaicos con ventanas temporales consistentes de 60 días: <strong>T1</strong> utilizando datos hasta el final del mes anterior, y <strong>T2</strong> utilizando datos hasta el final del mes actual. Esta metodología mes-a-mes evita la mezcla de temporalidades, garantizando coherencia temporal en la comparación y permitiendo detectar áreas que no eran urbanas en el mes anterior pero que se urbanizaron en el mes actual. La ventana de 60 días (~18 imágenes en Dynamic World) permite mejorar robustez ante cobertura de nubes en comparación con periodos más cortos (30 días, ~12 imágenes).</p>
       <p> A partir de estas imágenes, se aplicó un umbral probabilístico para identificar las zonas que pasaron de ser no construidas a construidas. Para facilitar la interpretación de los resultados, se definieron dos niveles de expansión urbana a partir de la probabilidad de que un píxel haya pasado a ser área construida en el área y periodo de análisis:</p>
       <ol>
         <li><strong>Expansión urbana:</strong> Identifica zonas donde existe una transición clara desde coberturas no urbanas hacia coberturas urbanas. En este caso, se consideran píxeles que en el periodo inicial presentaban una baja probabilidad de urbanización (menor al 20%) y que en el periodo posterior superan el 50% de probabilidad de ser urbanos. </li>
