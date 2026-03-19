@@ -5,6 +5,7 @@ import pandas as pd
 from pathlib import Path
 
 from src.aux_utils import export_image, make_relative_path
+from src.config import GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX
 from reporte.render_report import render
 
 def get_dw_mosaic_1year(end_date, geometry, bands=None, window_days=60):
@@ -219,31 +220,47 @@ def gcs_to_base64_data_uri(gcs_path):
 def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_path, footer_img_path, output_dir, month, year, mes_num):
     """Genera reporte final en JSON y HTML"""
     df = pd.read_csv(df_path)
+    
+    # Convertir columnas numéricas a float para evitar TypeError
+    if 'interseccion_ha' in df.columns:
+        df['interseccion_ha'] = pd.to_numeric(df['interseccion_ha'], errors='coerce').fillna(0)
+    if 'no_interseccion_ha' in df.columns:
+        df['no_interseccion_ha'] = pd.to_numeric(df['no_interseccion_ha'], errors='coerce').fillna(0)
+    if 'total_ha' in df.columns:
+        df['total_ha'] = pd.to_numeric(df['total_ha'], errors='coerce').fillna(0)
+    
     if os.path.exists(strict_path):
         df_strict = pd.read_csv(strict_path)[["NOMBRE", "interseccion_ha"]].rename(columns={"interseccion_ha": "interseccion_ha_strict"})
+        df_strict['interseccion_ha_strict'] = pd.to_numeric(df_strict['interseccion_ha_strict'], errors='coerce').fillna(0)
         df = df.merge(df_strict, on="NOMBRE", how="left").fillna(0)
     else:
         df["interseccion_ha_strict"] = 0
 
-    df_top = df.nlargest(5, "interseccion_ha")
-    top_upls = [
-        {
-            "UPL": r["NOMBRE"],
-            "INTER_HA": round(r["interseccion_ha"], 2),
-            "INTER_HA_STRICT": round(r["interseccion_ha_strict"], 2),
-            "TOTAL_HA": round(r["total_ha"], 2)
-        }
-        for _, r in df_top.iterrows()
-    ]
+    # Manejar caso de DataFrame vacío o sin datos
+    if len(df) == 0 or df['interseccion_ha'].sum() == 0:
+        top_upls = []
+    else:
+        df_top = df.nlargest(5, "interseccion_ha")
+        top_upls = [
+            {
+                "UPL": r["NOMBRE"],
+                "INTER_HA": round(r["interseccion_ha"], 2),
+                "INTER_HA_STRICT": round(r["interseccion_ha_strict"], 2),
+                "TOTAL_HA": round(r["total_ha"], 2)
+            }
+            for _, r in df_top.iterrows()
+        ]
 
     base_dir = Path(output_dir)
     fecha_rango = f"{month}_{year}"
+    map_iframe_url = f"https://storage.googleapis.com/{GCS_OUTPUT_BUCKET}/{GCS_OUTPUT_PREFIX}/{year}_{mes_num:02d}/maps/map_expansion.html"
     data = {
         "TITULO": f"Expansión urbana {month.capitalize()} {year}",
         "FECHA_REPORTE": f"{month.capitalize()} {year}",
         "HEADER_IMG1": gcs_to_base64_data_uri(header_img1_path),
         "HEADER_IMG2": gcs_to_base64_data_uri(header_img2_path),
         "FOOTER_IMG": gcs_to_base64_data_uri(footer_img_path),
+        "MAP_IFRAME_URL": map_iframe_url,
         "TOP_UPLS": top_upls,
         "month": month,
         "year": year,
