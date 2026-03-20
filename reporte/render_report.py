@@ -4,6 +4,7 @@ from pathlib import Path
 from google.cloud import storage
 
 SECTION_PAT = re.compile(r"{{#(\w+)}}(.*?){{/\1}}", re.DOTALL)
+INVERTED_SECTION_PAT = re.compile(r"{{\^(\w+)}}(.*?){{/\1}}", re.DOTALL)
 TOKEN_PAT = re.compile(r"{{\s*([\w\.]+)\s*}}")
 
 def _read_text(path):
@@ -37,16 +38,41 @@ def render(template_path: Path, data_path: Path, out_path: Path):
 
 def render_template(tpl: str, root: dict) -> str:
     def _render_block(block: str, ctx: dict) -> str:
+        # Procesar secciones normales (positivas)
         def _section(m):
             key, inner = m.group(1), m.group(2)
-            arr = ctx.get(key, [])
-            if not isinstance(arr, list):
+            val = ctx.get(key, root.get(key, None))
+            
+            # Si es lista/array, iterar
+            if isinstance(val, list):
+                return "".join(_render_block(inner, {**ctx, **item}) for item in val)
+            # Si es booleano/truthy, renderizar el contenido
+            elif val:
+                return _render_block(inner, ctx)
+            else:
                 return ""
-            return "".join(_render_block(inner, {**ctx, **item}) for item in arr)
 
+        # Procesar secciones invertidas (negativas)
+        def _inverted_section(m):
+            key, inner = m.group(1), m.group(2)
+            val = ctx.get(key, root.get(key, None))
+            
+            # Si es falsy (False, None, [], "", 0), renderizar
+            if not val:
+                return _render_block(inner, ctx)
+            else:
+                return ""
+
+        # Primero procesar secciones normales
         out = SECTION_PAT.sub(_section, block)
+        # Luego procesar secciones invertidas
+        out = INVERTED_SECTION_PAT.sub(_inverted_section, out)
+        
+        # Finalmente procesar tokens
         def _token(m):
             k = m.group(1)
             return str(ctx.get(k, root.get(k, "")))
+        
         return TOKEN_PAT.sub(_token, out)
+    
     return _render_block(tpl, root)

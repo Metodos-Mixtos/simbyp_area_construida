@@ -237,9 +237,9 @@ def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_p
         df["interseccion_ha_strict"] = 0
 
     # Manejar caso de DataFrame vacío o sin datos
-    if len(df) == 0 or df['interseccion_ha'].sum() == 0:
-        top_upls = []
-    else:
+    has_expansion = len(df) > 0 and df['interseccion_ha'].sum() > 0
+    
+    if has_expansion:
         df_top = df.nlargest(5, "interseccion_ha")
         top_upls = [
             {
@@ -250,6 +250,8 @@ def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_p
             }
             for _, r in df_top.iterrows()
         ]
+    else:
+        top_upls = []
 
     base_dir = Path(output_dir)
     fecha_rango = f"{month}_{year}"
@@ -262,6 +264,7 @@ def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_p
         "FOOTER_IMG": gcs_to_base64_data_uri(footer_img_path),
         "MAP_IFRAME_URL": map_iframe_url,
         "TOP_UPLS": top_upls,
+        "HAS_EXPANSION": has_expansion,
         "month": month,
         "year": year,
         "mes_num": f"{mes_num:02d}",
