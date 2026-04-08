@@ -203,11 +203,20 @@ def export_sentinel_as_png(
     # Crear cuadrícula de tiles completa
     all_tiles = create_grid(minx, miny, maxx, maxy, n_tiles=n_tiles)
     
+    # Preparar carpetas de salida
+    t1_folder = os.path.join(output_dir, f"sentinel_{end_t1}_t1")
+    t2_folder = os.path.join(output_dir, f"sentinel_{end_t2}_t2")
+    os.makedirs(t1_folder, exist_ok=True)
+    os.makedirs(t2_folder, exist_ok=True)
+    
     # Filtrar tiles que contienen expansión urbana
+    tiles_with_indices = []
+    
     if intersections_dir:
         expansion_geoms = []
-        normal_path = os.path.join(intersections_dir, "new_urban_intersections.geojson")
-        strict_path = os.path.join(intersections_dir, "new_urban_strict_intersections.geojson")
+        # Buscar intersecciones confirmadas (con filtro NDBI)
+        normal_path = os.path.join(intersections_dir, "new_urban_confirmed_intersections.geojson")
+        strict_path = os.path.join(intersections_dir, "new_urban_strict_confirmed_intersections.geojson")
         
         if os.path.exists(normal_path):
             gdf_normal = gpd.read_file(normal_path).to_crs(epsg=4326)
@@ -222,7 +231,6 @@ def export_sentinel_as_png(
             expansion_union = unary_union(expansion_geoms)
             
             # Filtrar tiles que intersectan con la expansión
-            tiles_with_indices = []
             for idx, tile_bbox in enumerate(all_tiles):
                 tile_geom = box(tile_bbox[0], tile_bbox[1], tile_bbox[2], tile_bbox[3])
                 if tile_geom.intersects(expansion_union):
@@ -231,26 +239,16 @@ def export_sentinel_as_png(
             print(f"📐 AOI dividido en {len(all_tiles)} tiles ({n_tiles}x{n_tiles})")
             print(f"✂️ Optimizado: solo {len(tiles_with_indices)} tiles contienen expansión urbana")
         else:
-            print("⚠️ No hay geometrías de expansión, descargando todos los tiles")
-            tiles_with_indices = list(enumerate(all_tiles))
-    else:
-        tiles_with_indices = list(enumerate(all_tiles))
-        print(f"📐 AOI dividido en {len(all_tiles)} tiles ({n_tiles}x{n_tiles})")
-
-    col_id = "COPERNICUS/S2_SR_HARMONIZED"
-    vis = {"min": 0, "max": 3000, "bands": ["B4", "B3", "B2"], "gamma": 1.1}
-    sel = ["B4", "B3", "B2"]
-
-    # Limpiar y crear carpetas para cada periodo (elimina tiles viejos)
-    import glob
-    t1_folder = os.path.join(output_dir, f"sentinel_{end_t1}_t1")
-    t2_folder = os.path.join(output_dir, f"sentinel_{end_t2}_t2")
-    
-    # Crear carpetas si no existen
-    os.makedirs(t1_folder, exist_ok=True)
-    os.makedirs(t2_folder, exist_ok=True)
+            # Sin expansión: no descargar tiles
+            print("⚠️ Sin expansión detectada: omitiendo descarga de tiles")
+            return {
+                "t1_tiles": [],
+                "t2_tiles": [],
+                "bounds": [[miny, minx], [maxy, maxx]]
+            }
     
     # Eliminar solo archivos PNG antiguos (evita problemas con OneDrive)
+    import glob
     for folder in [t1_folder, t2_folder]:
         old_tiles = glob.glob(os.path.join(folder, "*.png"))
         if old_tiles:
@@ -260,6 +258,19 @@ def export_sentinel_as_png(
                     os.remove(old_tile)
                 except Exception as e:
                     print(f"⚠️  No se pudo eliminar {os.path.basename(old_tile)}: {e}")
+    
+    # Si no hay tiles con expansión, retornar sin descargar
+    if not tiles_with_indices:
+        print("⚠️ Sin áreas de expansión en los tiles: omitiendo descarga de Sentinel-2")
+        return {
+            "t1_tiles": [],
+            "t2_tiles": [],
+            "bounds": [[miny, minx], [maxy, maxx]]
+        }
+
+    col_id = "COPERNICUS/S2_SR_HARMONIZED"
+    vis = {"min": 0, "max": 3000, "bands": ["B4", "B3", "B2"], "gamma": 1.1}
+    sel = ["B4", "B3", "B2"]
 
     def download_tile_png(end_date, tile_bbox, tile_index, output_folder):
         """Descarga un tile individual de Sentinel a 10m/píxel."""
@@ -362,7 +373,6 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
         t1_group = folium.FeatureGroup(name=f"Sentinel-2 {previous_month_str} {year}", show=True)
         
         for tile in png_images["t1_tiles"]:
-            # Usar ruta ABSOLUTA (Folium las embebe como base64 por defecto, pero las necesita para leerlas)
             folium.raster_layers.ImageOverlay(
                 image=tile["path"],
                 bounds=tile["bounds"],
@@ -378,7 +388,6 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
         t2_group = folium.FeatureGroup(name=f"Sentinel-2 {month_str} {year}", show=False)
         
         for tile in png_images["t2_tiles"]:
-            # Usar ruta ABSOLUTA
             folium.raster_layers.ImageOverlay(
                 image=tile["path"],
                 bounds=tile["bounds"],
@@ -387,8 +396,6 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
                 cross_origin=False,
                 zindex=1
             ).add_to(t2_group)
-        
-        t2_group.add_to(m)
         
         t2_group.add_to(m)
         
@@ -406,18 +413,18 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
             tiles=tiles_current,
             name=f"Sentinel-2 {month_str} {year}",
             attr="Sentinel-2 EE Mosaic",
-        overlay=True,
-        show=False
-    ).add_to(m)
+            overlay=True,
+            show=False
+        ).add_to(m)
 
-    # Capas de expansión urbana
-    normal_path = os.path.join(intersections_dir, "new_urban_intersections.geojson")
+    # Capas de expansión urbana (confirmadas con filtro NDBI)
+    normal_path = os.path.join(intersections_dir, "new_urban_confirmed_intersections.geojson")
     if os.path.exists(normal_path):
         gdf_norm = sanitize_gdf(gpd.read_file(normal_path).to_crs(epsg=4326))
         folium.GeoJson(json.loads(gdf_norm.to_json()), name="Expansión del área construida",
                        style_function=lambda x: {"color": "orange", "weight": 1.5, "fillOpacity": 0.05}).add_to(m)
 
-    strict_path = os.path.join(intersections_dir, "new_urban_strict_intersections.geojson")
+    strict_path = os.path.join(intersections_dir, "new_urban_strict_confirmed_intersections.geojson")
     if os.path.exists(strict_path):
         gdf_strict = sanitize_gdf(gpd.read_file(strict_path).to_crs(epsg=4326))
         folium.GeoJson(json.loads(gdf_strict.to_json()), name="Expansión estricta del área construida",
@@ -434,29 +441,6 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     # Control de capas
     folium.LayerControl(collapsed=False).add_to(m)
     m.save(output_path)
-    
-    # Post-procesamiento: convertir rutas absolutas embebidas a rutas relativas
-    if png_images and "t1_tiles" in png_images:
-        output_dir = os.path.dirname(output_path)
-        
-        # Leer el HTML generado
-        with open(output_path, 'r', encoding='utf-8') as f:
-            html_content = f.read()
-        
-        # Reemplazar rutas absolutas por relativas
-        for tile in png_images["t1_tiles"] + png_images["t2_tiles"]:
-            abs_path = tile["path"]
-            rel_path = os.path.relpath(abs_path, output_dir).replace("\\", "/")
-            
-            # Folium puede embedder como base64 o como ruta, buscar ambos patrones
-            # Patrón 1: url("file:///C:/ruta/absoluta/tile.png")
-            html_content = html_content.replace(f'file:///{abs_path.replace(chr(92), "/")}', rel_path)
-            html_content = html_content.replace(abs_path.replace("\\", "/"), rel_path)
-            html_content = html_content.replace(abs_path, rel_path)
-        
-        # Guardar el HTML modificado
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(html_content)
     
 def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, year, sac, reserva, eep):
     """Genera mosaicos Sentinel y mapa interactivo usando PNG estáticos (optimizado)"""

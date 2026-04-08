@@ -26,7 +26,7 @@ if credentials_path:
 from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH, GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX
 from src.aux_utils import authenticate_gee, load_geometry, set_dates, cleanup_temp_data
 from src.stats_utils import calculate_expansion_areas, create_intersections
-from src.pipeline_utils import prepare_folders, process_dynamic_world, build_report 
+from src.pipeline_utils import prepare_folders, cleanup_month_outputs, process_dynamic_world, build_report 
 from src.maps_utils import generate_maps
 
 # Suppress warnings
@@ -40,7 +40,7 @@ except:
     locale.setlocale(locale.LC_TIME, "es_CO.UTF-8")
 
 
-def main(anio: int, mes: int):
+def main(anio: int, mes: int, apply_ndbi_validation: bool = True):
     # Check required environment variables
     if not GOOGLE_CLOUD_PROJECT:
         raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set. Please add it to your .env file.")
@@ -62,6 +62,10 @@ def main(anio: int, mes: int):
 
     # === Preparar carpetas de salida ===
     dirs = prepare_folders(BASE_PATH, anio, mes)
+    
+    # === Limpiar archivos del período anterior ===
+    cleanup_month_outputs(dirs)
+    
     fecha_rango = f"{anio}_{mes:02d}"
     OUTPUT_FOLDER = os.path.join(BASE_PATH, "urban_sprawl", "outputs", fecha_rango)
 
@@ -71,19 +75,20 @@ def main(anio: int, mes: int):
     geometry = load_geometry(AOI_PATH)
 
     # === 1. Dynamic World ===
-    dw_paths = process_dynamic_world(geometry, dirs["dw"], last_day_prev, last_day_curr)
+    dw_paths = process_dynamic_world(geometry, dirs["dw"], last_day_prev, last_day_curr, apply_ndbi_validation=apply_ndbi_validation)
 
-    # === 2. Intersecciones ===
-     # Intersecciones
+    # === 2. Intersecciones (desde archivos CONFIRMADOS con filtro NDBI) ===
+     # Intersecciones confirmadas (NDBI >= 0.3)
     create_intersections(dw_paths["new_urban"], SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"])
      
-     # Intersecciones estrictas
+     # Intersecciones confirmadas estrictas (NDBI >= 0.3)
     create_intersections(dw_paths["new_urban_strict"], SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"])
     
-    # === 3. Estadísticas ===
-    calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH)
+    # === 3. Estadísticas (desde intersecciones CONFIRMADAS) ===
+    # Nota: dw_paths["new_urban"] es new_urban_confirmed.tif cuando hay validación NDBI
+    calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH, file_suffix="new_urban_confirmed")
     
-    calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH, prefix="strict_", file_suffix="new_urban_strict")
+    calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH, prefix="strict_", file_suffix="new_urban_strict_confirmed")
 
     # === 4. Mapas Sentinel ===
     try:
@@ -157,6 +162,10 @@ if __name__ == "__main__":
                         help=f"Año en formato YYYY (default: {default_year})")
     parser.add_argument("--mes", type=int, default=default_month, 
                         help=f"Mes en formato numérico 1-12 (default: {default_month})")
+    parser.add_argument("--ndbi-validation", dest="ndbi_validation", action="store_true", default=True,
+                        help="Aplicar validación NDBI (default: activado)")
+    parser.add_argument("--no-ndbi-validation", dest="ndbi_validation", action="store_false",
+                        help="Desactivar validación NDBI")
     args = parser.parse_args()
 
-    main(args.anio, args.mes)
+    main(args.anio, args.mes, apply_ndbi_validation=args.ndbi_validation)

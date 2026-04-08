@@ -10,12 +10,42 @@ Este proyecto analiza la expansión urbana mensual en el área de Bogotá median
 
 - Procesamiento automatizado de imágenes satelitales Dynamic World
 - Análisis de expansión urbana mensual
+- **Validación espectral con NDBI (Sentinel-2)** para confirmar construcciones reales
 - Generación de mapas interactivos con Sentinel-2
 - Cálculo de estadísticas de área construida
 - Análisis de intersecciones con áreas protegidas
 - Generación automática de reportes HTML
 
-## Requisitos
+## Metodología: Validación NDBI
+
+### ¿Qué es NDBI?
+
+El **Índice de Diferencia Normalizada de Construcción (NDBI)** combina las bandas de infrarrojo cercano (NIR, B8) e infrarrojo de onda corta (SWIR, B11) de Sentinel-2 para identificar superficies construidas y se calcula de la siguente manera:
+
+```
+NDBI = (SWIR - NIR) / (SWIR + NIR) = (B11 - B8) / (B11 + B8)
+```
+
+- **NDBI ≥ Umbral establecido**: Alta probabilidad de construcción 
+- **NDBI < 0 **: Vegetación, suelo desnudo, agua u otros usos no urbanos
+
+### Pipeline Dual de Validación
+
+1. **Detección con Dynamic World**: Identifica píxeles donde `DW_T1 < 0.2 AND DW_T2 > threshold`
+   - `new_urban`: threshold = 0.5 (expansión urbana estándar)
+   - `new_urban_strict`: threshold = 0.7 (expansión urbana estricta)
+
+2. **Validación NDBI (Sentinel-2)**: Filtra con imágenes de los últimos 60 días
+   - **CONFIRMADAS** (NDBI ≥ Umbral establecido): Se reportan en HTML
+   - **NO CONFIRMADAS** (NDBI < Umbral establecido o sin datos): Se guardan para análisis interno
+
+### Ventajas
+
+- Reduce falsos positivos: solo reporta construcciones espectralmente validadas
+- Mayor precisión: combina clasificación temporal (DW) con firma espectral (NDBI)
+- Coherencia temporal: ventana de 60 días mantiene especificidad mensual
+
+
 
 - Python 3.8+
 - Cuenta de Google Cloud Platform con Google Earth Engine habilitado

@@ -35,8 +35,9 @@
     <h1>Reporte mensual de expansión urbana en Bogotá</h1>
     <div class="note">{{FECHA_REPORTE}}</div> 
 
+    {{#HAS_EXPANSION}}
     <h2>Resumen</h2>
-    A continuación, se muestran las cinco Unidades de Planeamiento Local (UPLs) con mayor aumento del área construida en áreas con restricciones para la construcción, el periodo seleccionado. 
+    A continuación, se muestran las Unidades de Planeamiento Local (UPLs) con mayor aumento del área construida en áreas con restricciones para la construcción, el periodo seleccionado. 
     <table>
       <tr><th>UPL</th><th>Nueva área construida en áreas no permitidas (ha)</th><th>Nueva área construida estricta en áreas no permitidas (ha)</th><th>Total de nueva área construida (ha)</th></tr>
       {{#TOP_UPLS}}
@@ -49,6 +50,24 @@
     <iframe src="{{MAP_IFRAME_URL}}" width="100%" height="600px" frameborder="0"></iframe>
     <p style="font-size:12px; color:#555; margin-top:8px;">{{FUENTE}}</p>
     </section>
+    {{/HAS_EXPANSION}}
+
+    {{^HAS_EXPANSION}}
+    <div class="card--resaltada">
+      <h2 style="text-align: center;"> No se detectó expansión urbana </h2>
+      <p style="text-align: center; font-size: 16px; padding: 2rem 1rem;">
+        No se detectaron nuevas áreas de expansión urbana en zonas con restricciones para la construcción durante el periodo <strong>{{FECHA_REPORTE}}</strong>.
+      </p>
+      <p style="text-align: center; color: #555;">
+        Esto puede deberse a:
+      </p>
+      <ul style="max-width: 700px; margin: 0 auto;">
+        <li>No hubo cambios significativos de cobertura no urbana a urbana en el periodo analizado</li>
+        <li>Los cambios detectados por Dynamic World no cumplieron el umbral de validación NDBI (≥0.3) que confirma construcciones reales</li>
+        <li><strong>Las áreas de expansión detectadas no pudieron confirmarse por alta nubosidad</strong> </li>
+      </ul>
+    </div>
+    {{/HAS_EXPANSION}}
 
     <div class="card">
       <h2>Metodología</h2>
@@ -58,6 +77,13 @@
         <li><strong>Expansión urbana:</strong> Identifica zonas donde existe una transición clara desde coberturas no urbanas hacia coberturas urbanas. En este caso, se consideran píxeles que en el periodo inicial presentaban una baja probabilidad de urbanización (menor al 20%) y que en el periodo posterior superan el 50% de probabilidad de ser urbanos. </li>
         <li><strong>Expansión urbana estricta:</strong> Corresponde a un criterio más conservador y exigente. Incluye únicamente aquellos píxeles que, partiendo de una probabilidad baja de urbanización en el periodo inicial (menor al 20%), alcanzan en el periodo posterior una probabilidad superior al 70%. Este umbral más alto refleja un mayor nivel de certeza en la conversión del suelo hacia uso urbano, y permite identificar zonas de urbanización más consolidada.</li>
       </ol>
+      <h3>Validación espectral con NDBI</h3>
+      <p>Adicionalmente, se implementó una validación espectral utilizando el <strong>Índice de Diferencia Normalizada de Construcción (NDBI)</strong> calculado a partir de imágenes Sentinel-2 de los últimos 2 meses (60 días). El NDBI utiliza las bandas del infrarrojo cercano (NIR, B8) e infrarrojo de onda corta (SWIR, B11) para identificar superficies construidas:</p>
+      <p style="text-align: center; font-family: monospace; background: #f5f5f5; padding: 0.5rem; border-radius: 4px;">NDBI = (SWIR - NIR) / (SWIR + NIR)</p>
+      <p>Solo se reportan en este documento las expansiones <strong>confirmadas espectralmente</strong>: píxeles que cumplan simultáneamente (1) cambio de cobertura detectado por Dynamic World, y (2) NDBI ≥ 0.3 calculado con observaciones Sentinel-2 sin nubes. La ventana de 60 días mantiene la especificidad temporal para alertas mensuales.</p>
+      <p style="background: #f9f9f9; padding: 0.8rem; border-left: 4px solid #e3351f; margin: 1rem 0; font-size: 13px;"><strong>Nota sobre cobertura:</strong> En meses con alta nubosidad, algunas áreas de potencial expansión pueden quedar sin confirmación NDBI. Estas se guardan como "no confirmadas" para análisis interno pero <strong>no se incluyen en este reporte</strong> para mantener alta confiabilidad en las alertas reportadas.</p>
+      
+      <h3>Intersección con áreas de restricción</h3>
       <p>Posteriormente, el resultado de expansión urbana se intersectó con tres capas ambientales y normativas clave:</p>
       <ul>
         <li><strong>Situación ambientalmente conflictiva (SAC):</strong> Identifica zonas de alta presión antrópica o conflictos de uso del suelo.</li>

@@ -4,6 +4,7 @@ from pathlib import Path
 from google.cloud import storage
 
 SECTION_PAT = re.compile(r"{{#(\w+)}}(.*?){{/\1}}", re.DOTALL)
+INVERTED_SECTION_PAT = re.compile(r"{{\^(\w+)}}(.*?){{/\1}}", re.DOTALL)
 TOKEN_PAT = re.compile(r"{{\s*([\w\.]+)\s*}}")
 
 def _read_text(path):
@@ -37,14 +38,37 @@ def render(template_path: Path, data_path: Path, out_path: Path):
 
 def render_template(tpl: str, root: dict) -> str:
     def _render_block(block: str, ctx: dict) -> str:
+        # Manejar secciones normales {{#KEY}}...{{/KEY}}
         def _section(m):
             key, inner = m.group(1), m.group(2)
-            arr = ctx.get(key, [])
-            if not isinstance(arr, list):
+            val = ctx.get(key, root.get(key))
+            
+            # Si es lista, iterar
+            if isinstance(val, list):
+                return "".join(_render_block(inner, {**ctx, **item}) for item in val)
+            # Si es booleano True o valor truthy, mostrar una vez
+            elif val:
+                return _render_block(inner, ctx)
+            # Si es False, None, 0, "", no mostrar
+            else:
                 return ""
-            return "".join(_render_block(inner, {**ctx, **item}) for item in arr)
-
-        out = SECTION_PAT.sub(_section, block)
+        
+        # Manejar secciones inversas {{^KEY}}...{{/KEY}}
+        def _inverted_section(m):
+            key, inner = m.group(1), m.group(2)
+            val = ctx.get(key, root.get(key))
+            
+            # Mostrar solo si el valor es falsy (False, None, [], 0, "")
+            if not val or (isinstance(val, list) and len(val) == 0):
+                return _render_block(inner, ctx)
+            else:
+                return ""
+        
+        # Primero procesar secciones inversas, luego normales
+        out = INVERTED_SECTION_PAT.sub(_inverted_section, block)
+        out = SECTION_PAT.sub(_section, out)
+        
+        # Luego tokens simples
         def _token(m):
             k = m.group(1)
             return str(ctx.get(k, root.get(k, "")))
