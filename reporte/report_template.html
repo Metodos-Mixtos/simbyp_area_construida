@@ -36,6 +36,9 @@
     <div class="note">{{FECHA_REPORTE}}</div> 
 
     <h2>Resumen</h2>
+    {{#ENTROPY_ENABLED}}
+    <p><strong>📊 Nota:</strong> Los datos mostrados corresponden a expansión urbana <strong>validada por entropía de Shannon</strong> (H < {{ENTROPY_THRESHOLD}}), lo que reduce significativamente los falsos positivos en la detección. Ver detalles en la sección de metodología.</p>
+    {{/ENTROPY_ENABLED}}
     A continuación, se muestran las cinco Unidades de Planeamiento Local (UPLs) con mayor aumento del área construida en áreas con restricciones para la construcción, el periodo seleccionado. 
     <table>
       <tr><th>UPL</th><th>Nueva área construida en áreas no permitidas (ha)</th><th>Nueva área construida estricta en áreas no permitidas (ha)</th><th>Total de nueva área construida (ha)</th></tr>
@@ -69,6 +72,77 @@
 
       <div class="note">Para más información, consulte: <a href="https://developers.google.com/earth-engine/tutorials/community/introduction-to-dynamic-world-pt-3" target="_blank" rel="noopener noreferrer">Introducción a Dynamic World (parte 3).</a></div>
     </div>
+
+    {{#ENTROPY_ENABLED}}
+    <div class="card--resaltada">
+      <h2>🔍 Validación por Entropía de Shannon</h2>
+      <p>Además de los umbrales probabilísticos descritos anteriormente, se aplicó una capa adicional de validación basada en <strong>entropía de Shannon</strong> para reducir los falsos positivos en la detección de expansión urbana.</p>
+      
+      <p>La entropía es una medida estadística que cuantifica el nivel de <strong>incertidumbre o confianza</strong> en la clasificación de cobertura de cada píxel. Un píxel con baja entropía (cercana a 0) indica que el modelo de clasificación asignó una probabilidad muy alta a una sola clase de cobertura, reflejando alta confianza. Por el contrario, un píxel con alta entropía (cercana a 3.17 bits para 9 clases) indica que las probabilidades están distribuidas entre múltiples clases, reflejando incertidumbre en la clasificación.</p>
+      
+      <p>La fórmula utilizada es:</p>
+      <p style="text-align: center; font-family: monospace; font-size: 16px; margin: 1rem 0;">
+        H = -Σ(p<sub>i</sub> × log₂(p<sub>i</sub>))
+      </p>
+      <p style="font-size: 12px; text-align: center; color: #666;">
+        donde p<sub>i</sub> es la probabilidad de cada clase de cobertura (agua, árboles, pasto, cultivos, área construida, etc.)
+      </p>
+      
+      <h3>Criterio de filtrado</h3>
+      <p>Se aplicó un umbral de entropía de <strong>H < {{ENTROPY_THRESHOLD}}</strong> al periodo actual (T2). Solo se conservan los píxeles de expansión urbana que cumplen simultáneamente:</p>
+      <ol>
+        <li>Los criterios probabilísticos de expansión (descritos anteriormente)</li>
+        <li>Una entropía menor al umbral (H < {{ENTROPY_THRESHOLD}}), indicando alta confianza en la clasificación</li>
+      </ol>
+      
+      <h3>Resultados de la validación</h3>
+      <table>
+        <tr>
+          <th>Métrica</th>
+          <th>Expansión urbana</th>
+          <th>Expansión urbana estricta</th>
+        </tr>
+        <tr>
+          <td>Píxeles detectados (sin filtro)</td>
+          <td>{{ENTROPY_STATS.normal.original_pixels}}</td>
+          <td>{{ENTROPY_STATS.strict.original_pixels}}</td>
+        </tr>
+        <tr>
+          <td>Píxeles validados (H < {{ENTROPY_THRESHOLD}})</td>
+          <td>{{ENTROPY_STATS.normal.validated_pixels}}</td>
+          <td>{{ENTROPY_STATS.strict.validated_pixels}}</td>
+        </tr>
+        <tr>
+          <td>Píxeles descartados (baja confianza)</td>
+          <td>{{ENTROPY_STATS.normal.filtered_out}}</td>
+          <td>{{ENTROPY_STATS.strict.filtered_out}}</td>
+        </tr>
+        <tr>
+          <td>Tasa de retención</td>
+          <td>{{ENTROPY_STATS.normal.retention_rate}}%</td>
+          <td>{{ENTROPY_STATS.strict.retention_rate}}%</td>
+        </tr>
+        <tr>
+          <td>Entropía promedio (píxeles validados)</td>
+          <td>{{ENTROPY_STATS.normal.avg_entropy}}</td>
+          <td>{{ENTROPY_STATS.strict.avg_entropy}}</td>
+        </tr>
+      </table>
+      
+      <p class="note" style="margin-top: 1rem;">
+        <strong>Interpretación:</strong> La validación por entropía elimina píxeles donde la clasificación es ambigua, 
+        reduciendo la inclusión de falsos positivos causados por mezclas de coberturas, sombras, nubes residuales 
+        o transiciones graduales entre clases.
+      </p>
+      
+      <div class="note">
+        Para más información sobre entropía de Shannon en clasificación de coberturas: 
+        <a href="https://en.wikipedia.org/wiki/Entropy_(information_theory)" target="_blank" rel="noopener noreferrer">
+          Teoría de la Información (Shannon, 1948)
+        </a>
+      </div>
+    </div>
+    {{/ENTROPY_ENABLED}}
   </div>
   
   <footer class="banner">

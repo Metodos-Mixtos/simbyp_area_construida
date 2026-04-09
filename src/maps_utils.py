@@ -411,17 +411,54 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     ).add_to(m)
 
     # Capas de expansión urbana
-    normal_path = os.path.join(intersections_dir, "new_urban_intersections.geojson")
-    if os.path.exists(normal_path):
-        gdf_norm = sanitize_gdf(gpd.read_file(normal_path).to_crs(epsg=4326))
-        folium.GeoJson(json.loads(gdf_norm.to_json()), name="Expansión del área construida",
-                       style_function=lambda x: {"color": "orange", "weight": 1.5, "fillOpacity": 0.05}).add_to(m)
+    # Prioridad: Mostrar versiones validadas por entropía si existen, sino originales
+    
+    # Verificar si existen versiones validadas por entropía
+    entropy_normal_path = os.path.join(intersections_dir, "new_urban_entropy_filtered_intersections.geojson")
+    entropy_strict_path = os.path.join(intersections_dir, "new_urban_strict_entropy_filtered_intersections.geojson")
+    has_entropy_validation = os.path.exists(entropy_normal_path) or os.path.exists(entropy_strict_path)
+    
+    if has_entropy_validation:
+        # MODO CON VALIDACIÓN: Mostrar solo capas validadas por entropía
+        # Capa principal 1: Expansión validada por entropía (naranja)
+        if os.path.exists(entropy_normal_path):
+            gdf_entropy_norm = sanitize_gdf(gpd.read_file(entropy_normal_path).to_crs(epsg=4326))
+            folium.GeoJson(
+                json.loads(gdf_entropy_norm.to_json()), 
+                name="Expansión del área construida",
+                style_function=lambda x: {"color": "orange", "weight": 2, "fillOpacity": 0.1},
+                show=True
+            ).add_to(m)
+        
+        # Capa principal 2: Expansión estricta validada (morado)
+        if os.path.exists(entropy_strict_path):
+            gdf_entropy_strict = sanitize_gdf(gpd.read_file(entropy_strict_path).to_crs(epsg=4326))
+            folium.GeoJson(
+                json.loads(gdf_entropy_strict.to_json()), 
+                name="Expansión estricta del área construida",
+                style_function=lambda x: {"color": "purple", "weight": 2, "fillOpacity": 0.1},
+                show=True
+            ).add_to(m)
+    
+    else:
+        # MODO NORMAL: Solo mostrar originales (cuando entropía no está activada)
+        normal_path = os.path.join(intersections_dir, "new_urban_intersections.geojson")
+        if os.path.exists(normal_path):
+            gdf_norm = sanitize_gdf(gpd.read_file(normal_path).to_crs(epsg=4326))
+            folium.GeoJson(
+                json.loads(gdf_norm.to_json()), 
+                name="Expansión del área construida",
+                style_function=lambda x: {"color": "orange", "weight": 1.5, "fillOpacity": 0.05}
+            ).add_to(m)
 
-    strict_path = os.path.join(intersections_dir, "new_urban_strict_intersections.geojson")
-    if os.path.exists(strict_path):
-        gdf_strict = sanitize_gdf(gpd.read_file(strict_path).to_crs(epsg=4326))
-        folium.GeoJson(json.loads(gdf_strict.to_json()), name="Expansión estricta del área construida",
-                       style_function=lambda x: {"color": "purple", "weight": 1.5, "fillOpacity": 0.05}).add_to(m)
+        strict_path = os.path.join(intersections_dir, "new_urban_strict_intersections.geojson")
+        if os.path.exists(strict_path):
+            gdf_strict = sanitize_gdf(gpd.read_file(strict_path).to_crs(epsg=4326))
+            folium.GeoJson(
+                json.loads(gdf_strict.to_json()), 
+                name="Expansión estricta del área construida",
+                style_function=lambda x: {"color": "purple", "weight": 1.5, "fillOpacity": 0.05}
+            ).add_to(m)
         
     # Capas base (SAC, Reserva, EEP)
     folium.GeoJson(json.loads(gdf_sac.to_json()), name="Conflictos Socioambientales",

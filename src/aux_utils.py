@@ -199,16 +199,39 @@ def set_dates(mes, anio):
     return last_day_curr, last_day_prev
 
 def cleanup_temp_data():
-    """Limpiar todos los archivos temporales en TEMP_DATA_DIR."""
-    if TEMP_DATA_DIR.exists():
-        for item in TEMP_DATA_DIR.iterdir():
-            try:
-                if item.is_file():
-                    item.unlink()
-                    print(f"🗑️  Eliminado archivo temporal: {item.name}")
-                elif item.is_dir():
-                    shutil.rmtree(item)
-                    print(f"🗑️  Eliminado directorio temporal: {item.name}")
-            except Exception as e:
-                print(f"⚠️  No se pudo eliminar {item.name}: {e}")
-        print(f"✅ Carpeta temp_data limpiada")
+    """
+    Limpiar archivos temporales en TEMP_DATA_DIR.
+    
+    En Windows, algunos archivos pueden estar bloqueados por el sistema.
+    La limpieza continúa aunque algunos archivos no se puedan eliminar.
+    """
+    import time
+    
+    if not TEMP_DATA_DIR.exists():
+        return
+    
+    deleted_count = 0
+    locked_count = 0
+    
+    for item in TEMP_DATA_DIR.iterdir():
+        try:
+            if item.is_file():
+                item.unlink()
+                print(f"🗑️  Elimin ado: {item.name}")
+                deleted_count += 1
+            elif item.is_dir():
+                # Intentar eliminar directorio recursivamente
+                shutil.rmtree(item, ignore_errors=False)
+                print(f"🗑️  Eliminado: {item.name}/")
+                deleted_count += 1
+        except PermissionError:
+            # Archivo/carpeta bloqueado por Windows (común en OneDrive)
+            locked_count += 1
+        except Exception as e:
+            print(f"⚠️  No se pudo eliminar {item.name}: {type(e).__name__}")
+            locked_count += 1
+    
+    if deleted_count > 0:
+        print(f"✅ Limpieza: {deleted_count} items eliminados")
+    if locked_count > 0:
+        print(f"ℹ️  {locked_count} items bloqueados (posiblemente por OneDrive o en uso)")

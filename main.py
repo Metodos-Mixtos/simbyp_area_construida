@@ -23,7 +23,7 @@ if credentials_path:
         print(f"  Por favor verifica la ruta en tu archivo .env")
         sys.exit(1)
 
-from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH, GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX
+from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH, GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX, ENTROPY_THRESHOLD
 from src.aux_utils import authenticate_gee, load_geometry, set_dates, cleanup_temp_data
 from src.stats_utils import calculate_expansion_areas, create_intersections
 from src.pipeline_utils import prepare_folders, process_dynamic_world, build_report 
@@ -74,16 +74,55 @@ def main(anio: int, mes: int):
     dw_paths = process_dynamic_world(geometry, dirs["dw"], last_day_prev, last_day_curr)
 
     # === 2. Intersecciones ===
-     # Intersecciones
+    # Intersecciones normales
     create_intersections(dw_paths["new_urban"], SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"])
      
-     # Intersecciones estrictas
+    # Intersecciones estrictas
     create_intersections(dw_paths["new_urban_strict"], SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"])
+    
+    # Intersecciones validadas por entropía (esta rama SIEMPRE las genera)
+    print(f"\n🔍 Procesando intersecciones validadas por entropía (H < {ENTROPY_THRESHOLD})...")
+    
+    if "new_urban_entropy_filtered" in dw_paths and os.path.exists(dw_paths["new_urban_entropy_filtered"]):
+            create_intersections(
+                dw_paths["new_urban_entropy_filtered"], 
+                SAC_PATH, RESERVA_PATH, EEP_PATH, 
+                dirs["intersections"]
+            )
+    
+    if "new_urban_strict_entropy_filtered" in dw_paths and os.path.exists(dw_paths["new_urban_strict_entropy_filtered"]):
+            create_intersections(
+                dw_paths["new_urban_strict_entropy_filtered"], 
+                SAC_PATH, RESERVA_PATH, EEP_PATH, 
+                dirs["intersections"]
+            )
     
     # === 3. Estadísticas ===
     calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH)
     
     calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH, prefix="strict_", file_suffix="new_urban_strict")
+    
+    # Estadísticas para versiones validadas por entropía (esta rama SIEMPRE las genera)
+    entropy_normal_geojson = os.path.join(dirs["intersections"], "new_urban_entropy_filtered_intersections.geojson")
+    entropy_strict_geojson = os.path.join(dirs["intersections"], "new_urban_strict_entropy_filtered_intersections.geojson")
+    
+    if os.path.exists(entropy_normal_geojson):
+            calculate_expansion_areas(
+                dirs["intersections"], 
+                dirs["stats"], 
+                UPL_PATH, 
+                prefix="entropy_", 
+                file_suffix="new_urban_entropy_filtered"
+            )
+    
+    if os.path.exists(entropy_strict_geojson):
+            calculate_expansion_areas(
+                dirs["intersections"], 
+                dirs["stats"], 
+                UPL_PATH, 
+                prefix="entropy_strict_", 
+                file_suffix="new_urban_strict_entropy_filtered"
+            )
 
     # === 4. Mapas Sentinel ===
     try:
