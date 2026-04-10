@@ -71,6 +71,9 @@ def main(anio: int, mes: int):
     geometry = load_geometry(AOI_PATH)
 
     # === 1. Dynamic World ===
+    print(f"📊 Comparando períodos:")
+    print(f"   BEFORE: 90 días hasta {last_day_prev.strftime('%Y-%m-%d')} (trimestre)")
+    print(f"   CURRENT: 30 días hasta {last_day_curr.strftime('%Y-%m-%d')} (mes actual)")
     dw_paths = process_dynamic_world(geometry, dirs["dw"], last_day_prev, last_day_curr)
 
     # === 2. Intersecciones ===
@@ -98,19 +101,24 @@ def main(anio: int, mes: int):
         map_html = None
 
     # === 5. Reporte ===
-    # Las imágenes se usan directamente desde GCS sin descargarlas
-    build_report(
-        df_path=f"{dirs['stats']}/resumen_expansion_upl_ha.csv",
-        strict_path=f"{dirs['stats']}/resumen_expansion_upl_ha_strict.csv",
-        map_html=map_html,
-        header_img1_path=HEADER_IMG1_PATH,
-        header_img2_path=HEADER_IMG2_PATH,
-        footer_img_path=FOOTER_IMG_PATH,
-        output_dir=dirs["reportes"],
-        month=month_str,
-        year=anio,
-        mes_num=int(args.mes)
-    )
+    # Verificar si hay datos de expansión antes de generar reporte
+    csv_path = f"{dirs['stats']}/resumen_expansion_upl_ha.csv"
+    if os.path.exists(csv_path):
+        # Las imágenes se usan directamente desde GCS sin descargarlas
+        build_report(
+            df_path=csv_path,
+            strict_path=f"{dirs['stats']}/resumen_expansion_upl_ha_strict.csv",
+            map_html=map_html,
+            header_img1_path=HEADER_IMG1_PATH,
+            header_img2_path=HEADER_IMG2_PATH,
+            footer_img_path=FOOTER_IMG_PATH,
+            output_dir=dirs["reportes"],
+            month=month_str,
+            year=anio,
+            mes_num=int(args.mes)
+        )
+    else:
+        print(f"⚠️ No se detectó expansión urbana en {month_str} {anio}. No se generó reporte.")
 
     # === Subir carpeta completa a GCS ===
     def upload_folder_to_gcs(local_folder, gcs_bucket, gcs_prefix):
@@ -142,7 +150,7 @@ def main(anio: int, mes: int):
     print(f"   - GCS: gs://{GCS_OUTPUT_BUCKET}/{GCS_OUTPUT_PREFIX}/{fecha_rango}/")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Pipeline de expansión urbana mensual (mosaico 1 año atrás)")
+    parser = argparse.ArgumentParser(description="Pipeline de expansión urbana mensual (comparación trimestral vs mensual)")
     
     # Calculate default values: previous month and current year
     today = datetime.now()

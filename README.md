@@ -61,6 +61,78 @@ python main.py --anio 2025 --mes 12
 python main.py --anio 2025 --mes 12
 ```
 
+## Ramas y Metodologías
+
+Este proyecto tiene diferentes ramas experimentales con distintas metodologías de detección de expansión urbana:
+
+### `master` (Producción)
+**Metodología:** Comparación de mosaicos anuales con superposición
+
+- **BEFORE:** 365 días hasta el último día del mes anterior
+- **CURRENT:** 365 días hasta el último día del mes actual
+- **Superposición:** 11 meses de datos compartidos
+
+**Problema conocido:** La superposición de períodos puede generar **falsos positivos** debido a:
+- Cambios en cobertura de nubes entre períodos
+- Mejoras en el algoritmo de clasificación de Dynamic World
+- Fluctuaciones temporales en la clasificación de píxeles
+
+**Ejemplo para diciembre 2025:**
+```
+BEFORE:  1 dic 2024 ─────────────── 30 nov 2025 (365 días)
+CURRENT:           1 ene 2025 ──────────────── 31 dic 2025 (365 días)
+                        └─── 11 meses de superposición ───┘
+```
+
+### `monthly-comparison` (Experimental - Recomendada)
+**Metodología:** Comparación trimestral vs mensual 
+
+- **BEFORE:** 90 días (trimestre) hasta el último día del mes anterior
+- **CURRENT:** 30 días (mes) hasta el último día del mes actual
+- **Superposición:** Ninguna (0 meses)
+
+**Ventajas:**
+- Elimina falsos positivos por superposición de períodos
+- Detecta cambios reales del mes analizado
+- Reduce ruido de fluctuaciones temporales
+
+**Ejemplo para diciembre 2025:**
+```
+BEFORE:  2 oct 2025 ─────────── 30 nov 2025 (90 días - trimestre)
+CURRENT:                        1 dic 2025 ─────────── 31 dic 2025 (30 días - mes)
+                                └─── Sin superposición ───┘
+```
+
+**Uso:**
+```bash
+# Cambiar a la rama experimental
+git checkout monthly-comparison
+
+# Ejecutar análisis
+python main.py --anio 2025 --mes 12
+
+# Los resultados se guardan en GCS bajo: 
+# gs://desarrollo-reportes-simbyp/urban_sprawl/Monthly_comparison/
+```
+
+### `entropy_validation` (Experimental)
+**Metodología:** Validación con entropía de Shannon para reducir falsos positivos
+
+- Calcula entropía de clasificación H = -Σ(pi × log₂(pi)) para cada píxel
+- Filtra píxeles con baja confianza (H > 2.0)
+- Genera outputs validados y sin validar para comparación
+
+**Estado:** Requiere umbral de entropía calibrado con datos reales
+
+### `ndbi-validation` (Experimental)
+**Metodología:** Validación dual con Dynamic World + NDBI (Normalized Difference Built-up Index)
+
+- Combina clasificación de Dynamic World con índice espectral NDBI de Sentinel-2
+- Requiere que ambas fuentes confirmen la construcción
+- Genera 3 categorías: original, confirmado, no confirmado
+
+**Estado:** Requiere calibración de umbral NDBI
+
 ## Estructura del Proyecto
 
 ```

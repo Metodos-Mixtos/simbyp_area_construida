@@ -19,6 +19,6 @@ FOOTER_IMG_PATH = "gs://material-estatico-sdp/SIMBYP_DATA/SDP Logos/secre_5.png"
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
 
 # GCS output configuration
-GCS_OUTPUT_BUCKET = "reportes-simbyp"
-GCS_OUTPUT_PREFIX = "urban_sprawl"
+GCS_OUTPUT_BUCKET = "desarrollo-reportes-simbyp"
+GCS_OUTPUT_PREFIX = "urban_sprawl/Monthly_comparison"
 

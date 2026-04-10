@@ -22,6 +22,26 @@ def get_dw_mosaic_1year(end_date, geometry):
     )
     return collection.mosaic().clip(geometry)
 
+def get_dw_mosaic_monthly(end_date, geometry, days=30):
+    """Mosaico de Dynamic World (built) de los últimos N días hasta end_date.
+    
+    Args:
+        end_date: Fecha final del período
+        geometry: Geometría del área de interés
+        days: Número de días hacia atrás (30 para mes, 90 para trimestre)
+    """
+    end = ee.Date(end_date.strftime("%Y-%m-%d"))
+    start = end.advance(-days, "day")
+    collection = (
+        ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+        .filterDate(start, end)
+        .filterBounds(geometry)
+        .select("built")
+        .sort("system:time_start", False)
+        .sort("system:index")
+    )
+    return collection.mosaic().clip(geometry)
+
 def prepare_folders(base_path, anio, mes):
     """Crea los directorios de salida organizados por componente"""
     output_base = os.path.join(base_path, "urban_sprawl", "outputs")
@@ -35,9 +55,16 @@ def prepare_folders(base_path, anio, mes):
 
 
 def process_dynamic_world(geometry, output_dir, last_day_prev, last_day_curr):
-    """Genera y exporta los mosaicos de Dynamic World"""
-    before = get_dw_mosaic_1year(last_day_prev, geometry)
-    current = get_dw_mosaic_1year(last_day_curr, geometry)
+    """Genera y exporta los mosaicos de Dynamic World con comparación trimestral vs mensual.
+    
+    Estrategia:
+    - BEFORE: Trimestre completo (90 días) hasta el último día del mes anterior
+    - CURRENT: Mes actual completo (30 días) hasta el último día del mes actual
+    
+    Esto elimina superposición y reduce falsos positivos por nubes o cambios de algoritmo.
+    """
+    before = get_dw_mosaic_monthly(last_day_prev, geometry, days=90)  # Trimestre anterior
+    current = get_dw_mosaic_monthly(last_day_curr, geometry, days=30)  # Mes actual
 
     configs = [("new_urban", 0.5), ("new_urban_strict", 0.7)]
     paths = {}
