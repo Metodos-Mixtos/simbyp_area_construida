@@ -23,7 +23,16 @@ def get_dw_mosaic_1year(end_date, geometry):
     return collection.mosaic().clip(geometry)
 
 def get_dw_mosaic_monthly(end_date, geometry, days=30):
-    """Mosaico de Dynamic World (built) de los últimos N días hasta end_date.
+    """Mediana de Dynamic World (built) de los últimos N días hasta end_date.
+    
+    Usa .median() en lugar de .mosaic() para:
+    - Reducir falsos positivos causados por nubes, sombras y errores de clasificación
+    - Ser robusto contra outliers (valores atípicos en imágenes individuales)
+    - Representar el estado más frecuente/típico del píxel en el período
+    - Funcionar bien incluso con pocas imágenes (4-10 por período)
+    
+    Se aplica tanto a BEFORE (90 días) como CURRENT (30 días) para mantener
+    consistencia metodológica en la comparación temporal.
     
     Args:
         end_date: Fecha final del período
@@ -37,10 +46,8 @@ def get_dw_mosaic_monthly(end_date, geometry, days=30):
         .filterDate(start, end)
         .filterBounds(geometry)
         .select("built")
-        .sort("system:time_start", False)
-        .sort("system:index")
     )
-    return collection.mosaic().clip(geometry)
+    return collection.median().clip(geometry)
 
 def prepare_folders(base_path, anio, mes):
     """Crea los directorios de salida organizados por componente"""

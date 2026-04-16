@@ -174,7 +174,8 @@ def export_sentinel_as_png(
     end_t2: str,
     output_dir: str,
     intersections_dir: str = None,
-    lookback_days: int = 365,
+    lookback_days_t1: int = 180,
+    lookback_days_t2: int = 30,
     n_tiles: int = 6
 ):
     """
@@ -182,7 +183,17 @@ def export_sentinel_as_png(
     Divide el AOI en tiles para evitar límite de Earth Engine.
     OPTIMIZADO: Solo descarga tiles que contienen áreas de expansión urbana.
     
+    Usa períodos temporales ajustados para Sentinel-2:
+    - T1 (BEFORE): lookback_days_t1 días (default 180 = semestre, más datos para median)
+    - T2 (CURRENT): lookback_days_t2 días (default 30 = mes actual)
+    
+    Nota: T1 usa 180 días (no 90 como DW) para asegurar suficientes imágenes
+    sin nubes y evitar píxeles vacíos en .median(). T2 mantiene 30 días para
+    mostrar el cambio específico del mes.
+    
     Args:
+        lookback_days_t1: Días hacia atrás para T1/BEFORE (default 180 = semestre)
+        lookback_days_t2: Días hacia atrás para T2/CURRENT (default 30 = mes)
         n_tiles: Número de divisiones por eje (total = n_tiles x n_tiles tiles)
                  Por defecto 6 (36 tiles totales) para AOIs grandes
         intersections_dir: Directorio con geometrías de expansión urbana (para filtrar tiles)
@@ -261,7 +272,7 @@ def export_sentinel_as_png(
                 except Exception as e:
                     print(f"⚠️  No se pudo eliminar {os.path.basename(old_tile)}: {e}")
 
-    def download_tile_png(end_date, tile_bbox, tile_index, output_folder):
+    def download_tile_png(end_date, tile_bbox, tile_index, output_folder, lookback_days):
         """Descarga un tile individual de Sentinel a 10m/píxel."""
         tile_minx, tile_miny, tile_maxx, tile_maxy = tile_bbox
         geom = ee.Geometry.BBox(tile_minx, tile_miny, tile_maxx, tile_maxy)
@@ -275,11 +286,9 @@ def export_sentinel_as_png(
             .filterBounds(geom)
             .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
             .select(sel)
-            .sort("system:time_start", False)
-            .sort("system:index")
         )
 
-        image = collection.mosaic().clip(geom)
+        image = collection.median().clip(geom)
         
         # Obtener URL con escala de 10m/píxel
         url = image.getThumbURL({
@@ -301,18 +310,18 @@ def export_sentinel_as_png(
         return output_path, (tile_miny, tile_minx, tile_maxy, tile_maxx)  # bounds para folium
 
     # Descargar solo los tiles filtrados para t1
-    print(f"📥 Descargando {len(tiles_with_indices)} tiles para periodo T1 ({end_t1})...")
+    print(f"📥 Descargando {len(tiles_with_indices)} tiles para periodo T1 ({end_t1}, {lookback_days_t1} días)...")
     t1_tiles = []
     for i, (tile_idx, tile_bbox) in enumerate(tiles_with_indices):
-        path, bounds = download_tile_png(end_t1, tile_bbox, tile_idx, t1_folder)
+        path, bounds = download_tile_png(end_t1, tile_bbox, tile_idx, t1_folder, lookback_days_t1)
         t1_tiles.append({"path": path, "bounds": [[bounds[0], bounds[1]], [bounds[2], bounds[3]]]})
         print(f"  ✅ Tile {i+1}/{len(tiles_with_indices)} descargado")
     
     # Descargar solo los tiles filtrados para t2  
-    print(f"📥 Descargando {len(tiles_with_indices)} tiles para periodo T2 ({end_t2})...")
+    print(f"📥 Descargando {len(tiles_with_indices)} tiles para periodo T2 ({end_t2}, {lookback_days_t2} días)...")
     t2_tiles = []
     for i, (tile_idx, tile_bbox) in enumerate(tiles_with_indices):
-        path, bounds = download_tile_png(end_t2, tile_bbox, tile_idx, t2_folder)
+        path, bounds = download_tile_png(end_t2, tile_bbox, tile_idx, t2_folder, lookback_days_t2)
         t2_tiles.append({"path": path, "bounds": [[bounds[0], bounds[1]], [bounds[2], bounds[3]]]})
         print(f"  ✅ Tile {i+1}/{len(tiles_with_indices)} descargado")
     
@@ -467,7 +476,8 @@ def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_
         end_t2=bounds_curr.strftime("%Y-%m-%d"),
         output_dir=dirs["maps"],
         intersections_dir=dirs["intersections"],  # Pasar directorio para filtrar tiles
-        lookback_days=365
+        lookback_days_t1=180,  # Semestre para contexto BEFORE (más imágenes para median)
+        lookback_days_t2=30    # Mes para cambio CURRENT
     )
 
     map_html = os.path.join(dirs["maps"], f"map_expansion.html")

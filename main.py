@@ -26,7 +26,7 @@ if credentials_path:
 from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH, GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX
 from src.aux_utils import authenticate_gee, load_geometry, set_dates, cleanup_temp_data
 from src.stats_utils import calculate_expansion_areas, create_intersections
-from src.pipeline_utils import prepare_folders, process_dynamic_world, build_report 
+from src.pipeline_utils import prepare_folders, process_dynamic_world, build_report
 from src.maps_utils import generate_maps
 
 # Suppress warnings
