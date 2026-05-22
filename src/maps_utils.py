@@ -207,15 +207,10 @@ def export_sentinel_as_png(
     if intersections_dir:
         expansion_geoms = []
         normal_path = os.path.join(intersections_dir, "new_urban_intersections.geojson")
-        strict_path = os.path.join(intersections_dir, "new_urban_strict_intersections.geojson")
         
         if os.path.exists(normal_path):
             gdf_normal = gpd.read_file(normal_path).to_crs(epsg=4326)
             expansion_geoms.append(gdf_normal.unary_union)
-        
-        if os.path.exists(strict_path):
-            gdf_strict = gpd.read_file(strict_path).to_crs(epsg=4326)
-            expansion_geoms.append(gdf_strict.unary_union)
         
         if expansion_geoms:
             # Combinar todas las geometrías de expansión
@@ -416,12 +411,6 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
         gdf_norm = sanitize_gdf(gpd.read_file(normal_path).to_crs(epsg=4326))
         folium.GeoJson(json.loads(gdf_norm.to_json()), name="Expansión del área construida",
                        style_function=lambda x: {"color": "orange", "weight": 1.5, "fillOpacity": 0.05}).add_to(m)
-
-    strict_path = os.path.join(intersections_dir, "new_urban_strict_intersections.geojson")
-    if os.path.exists(strict_path):
-        gdf_strict = sanitize_gdf(gpd.read_file(strict_path).to_crs(epsg=4326))
-        folium.GeoJson(json.loads(gdf_strict.to_json()), name="Expansión estricta del área construida",
-                       style_function=lambda x: {"color": "purple", "weight": 1.5, "fillOpacity": 0.05}).add_to(m)
         
     # Capas base (SAC, Reserva, EEP)
     folium.GeoJson(json.loads(gdf_sac.to_json()), name="Conflictos Socioambientales",

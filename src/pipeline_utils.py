@@ -5,7 +5,7 @@ import pandas as pd
 from pathlib import Path
 
 from src.aux_utils import export_image, make_relative_path
-from src.config import GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX
+from src.config import GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX, URB_PROB
 from reporte.render_report import render
 
 def get_dw_mosaic_1year(end_date, geometry):
@@ -35,22 +35,21 @@ def prepare_folders(base_path, anio, mes):
 
 
 def process_dynamic_world(geometry, output_dir, last_day_prev, last_day_curr):
-    """Genera y exporta los mosaicos de Dynamic World"""
+    """Genera y exporta el mosaico de Dynamic World usando el umbral URB_PROB"""
     before = get_dw_mosaic_1year(last_day_prev, geometry)
     current = get_dw_mosaic_1year(last_day_curr, geometry)
 
-    configs = [("new_urban", 0.5), ("new_urban_strict", 0.7)]
-    paths = {}
-
-    for label, threshold in configs:
-        path = os.path.join(output_dir, f"{label}.tif")
-        paths[label] = path
-        if not os.path.exists(path):
-            result = before.lt(0.2).And(current.gt(threshold)).rename(label)
-            export_image(result, geometry, path)
-        else:
-            print(f"⏭{label} ya existente: {path}")
-    return paths
+    label = "new_urban"
+    path = os.path.join(output_dir, f"{label}.tif")
+    
+    if not os.path.exists(path):
+        result = before.lt(0.2).And(current.gt(URB_PROB)).rename(label)
+        export_image(result, geometry, path)
+        print(f"✅ Generado {label} con umbral URB_PROB={URB_PROB}")
+    else:
+        print(f"⏭ {label} ya existente: {path}")
+    
+    return path
 
 
 def gcs_to_base64_data_uri(gcs_path):
@@ -88,21 +87,15 @@ def gcs_to_base64_data_uri(gcs_path):
     
     return gcs_path
 
-def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_path, footer_img_path, output_dir, month, year, mes_num):
+def build_report(df_path, map_html, header_img1_path, header_img2_path, footer_img_path, output_dir, month, year, mes_num):
     """Genera reporte final en JSON y HTML"""
     df = pd.read_csv(df_path)
-    if os.path.exists(strict_path):
-        df_strict = pd.read_csv(strict_path)[["NOMBRE", "interseccion_ha"]].rename(columns={"interseccion_ha": "interseccion_ha_strict"})
-        df = df.merge(df_strict, on="NOMBRE", how="left").fillna(0)
-    else:
-        df["interseccion_ha_strict"] = 0
 
     df_top = df.nlargest(5, "interseccion_ha")
     top_upls = [
         {
             "UPL": r["NOMBRE"],
             "INTER_HA": round(r["interseccion_ha"], 2),
-            "INTER_HA_STRICT": round(r["interseccion_ha_strict"], 2),
             "TOTAL_HA": round(r["total_ha"], 2)
         }
         for _, r in df_top.iterrows()
@@ -122,6 +115,8 @@ def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_p
         "month": month,
         "year": year,
         "mes_num": f"{mes_num:02d}",
+        "URB_PROB": URB_PROB,
+        "URB_PROB_PERCENT": int(URB_PROB * 100),
         "FUENTE": "Dynamic World, Google Earth Engine"
     }
 
@@ -136,3 +131,103 @@ def build_report(df_path, strict_path, map_html, header_img1_path, header_img2_p
     template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "reporte", "report_template.html")
     render(Path(template_path), Path(json_path), Path(html_path))
     print(f"✅ Reporte generado: {html_path}")
+
+
+def build_no_expansion_report(header_img1_path, header_img2_path, footer_img_path, output_dir, month, year, mes_num):
+    """Genera reporte HTML simple cuando no se detectó expansión urbana"""
+    
+    # Crear JSON con información básica
+    report_data = {
+        "mes": month,
+        "anio": year,
+        "mes_num": f"{mes_num:02d}",
+        "expansion_detectada": False,
+        "mensaje": "No se detectó expansión urbana significativa en este período"
+    }
+    
+    os.makedirs(output_dir, exist_ok=True)
+    json_path = os.path.join(output_dir, "urban_sprawl_reporte.json")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(report_data, f, ensure_ascii=False, indent=2)
+    
+    # Generar HTML simple
+    html_content = f"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Reporte de expansión urbana en Bogotá</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ margin:0; padding:0; background:white; color:#1a1a1a; font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; }}
+    header.banner {{ background:#e3351f; width:100%; margin:0; padding:1.5rem 0; display:flex; justify-content:space-between; align-items:center; box-sizing:border-box; }}
+    header.banner img {{ height:70px; margin:0 2rem; }}
+    footer.banner {{ background:#e3351f; width:100%; margin:0; padding:1.5rem 0; text-align:center; display:block; box-sizing:border-box; position:relative; left:0; right:0; }}
+    footer.banner img {{ height:70px; }}
+    .wrap {{max-width: 1000px; margin: 0 auto; padding: 2rem; padding-bottom:0;}}
+    h1 {{font-size: 22pt; font-weight: bold; text-align: center;}}
+    .note {{font-size: 11pt; color: #555; text-align: center;}}
+    .message-box {{ 
+      background: #fff5f5; 
+      border: 2px solid #c53030; 
+      border-radius: 8px; 
+      padding: 3rem 2rem; 
+      margin: 3rem 0; 
+      text-align: center;
+    }}
+    .message-box h2 {{
+      color: #8F0000;
+      font-size: 20pt;
+      margin-bottom: 1rem;
+    }}
+    .message-box p {{
+      font-size: 14pt;
+      color: #555;
+      line-height: 1.8;
+    }}
+    section {{ margin-bottom:3rem; }}
+  </style>
+</head>
+<body>
+  <header class="banner">
+    <img src="{gcs_to_base64_data_uri(header_img1_path)}" alt="Aquí sí pasa Bogotá">
+    <img src="{gcs_to_base64_data_uri(header_img2_path)}" alt="Bogotá">
+  </header>
+  <div class="wrap">
+    <h1>Reporte mensual de expansión urbana en Bogotá</h1>
+    <div class="note">{month.capitalize()} {year}</div> 
+
+    <div class="message-box">
+      <p><strong>Para el mes analizado no se detectó expansión urbana.</strong></p>
+      <p>Durante el periodo de {month.capitalize()} {year}, no se identificaron cambios significativos en las coberturas que indiquen procesos de expansión urbana en el área de estudio según los criterios metodológicos establecidos.</p>
+    </div>
+
+    <section>
+      <h2 style="color: #8F0000;">Metodología</h2>
+      <p style="text-align: justify;">
+        Para la detección de expansión urbana se utilizó el enfoque de detección de cambio de coberturas usando bandas de probabilidad, 
+        basado en el conjunto de datos Dynamic World de Google Earth Engine. Este conjunto de datos proporciona, para cada píxel y fecha, 
+        las probabilidades de pertenecer a diferentes clases de cobertura, entre ellas la clase <strong>área construida</strong>.
+      </p>
+      <p style="text-align: justify;">
+        Se aplica un umbral probabilístico de <strong>{URB_PROB * 100:.0f}%</strong> para identificar las zonas que pasaron de ser no construidas a construidas. 
+        Cuando no se detectan píxeles que cumplan estos criterios en el período analizado, significa que no hubo cambios 
+        significativos en las coberturas urbanas del área de estudio.
+      </p>
+      <p style="font-size: 11pt; color: #555;">
+        <strong>Fuente:</strong> Dynamic World, Google Earth Engine
+      </p>
+    </section>
+  </div>
+  
+  <footer class="banner">
+    <img src="{gcs_to_base64_data_uri(footer_img_path)}" alt="Secretaría de Planeación">
+  </footer>
+</body>
+</html>
+"""
+    
+    html_path = os.path.join(output_dir, f"urban_sprawl_reporte_{year}_{month}.html")
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
+    
+    print(f"✅ Reporte sin expansión generado: {html_path}")

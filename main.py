@@ -4,6 +4,7 @@ from datetime import datetime
 import locale
 import sys
 import os
+import json
 from google.cloud import storage
 import warnings
 import dotenv
@@ -71,19 +72,13 @@ def main(anio: int, mes: int):
     geometry = load_geometry(AOI_PATH)
 
     # === 1. Dynamic World ===
-    dw_paths = process_dynamic_world(geometry, dirs["dw"], last_day_prev, last_day_curr)
+    dw_path = process_dynamic_world(geometry, dirs["dw"], last_day_prev, last_day_curr)
 
     # === 2. Intersecciones ===
-     # Intersecciones
-    create_intersections(dw_paths["new_urban"], SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"])
-     
-     # Intersecciones estrictas
-    create_intersections(dw_paths["new_urban_strict"], SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"])
+    create_intersections(dw_path, SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"])
     
     # === 3. Estadísticas ===
     calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH)
-    
-    calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH, prefix="strict_", file_suffix="new_urban_strict")
 
     # === 4. Mapas Sentinel ===
     try:
@@ -99,18 +94,34 @@ def main(anio: int, mes: int):
 
     # === 5. Reporte ===
     # Las imágenes se usan directamente desde GCS sin descargarlas
-    build_report(
-        df_path=f"{dirs['stats']}/resumen_expansion_upl_ha.csv",
-        strict_path=f"{dirs['stats']}/resumen_expansion_upl_ha_strict.csv",
-        map_html=map_html,
-        header_img1_path=HEADER_IMG1_PATH,
-        header_img2_path=HEADER_IMG2_PATH,
-        footer_img_path=FOOTER_IMG_PATH,
-        output_dir=dirs["reportes"],
-        month=month_str,
-        year=anio,
-        mes_num=int(args.mes)
-    )
+    stats_csv = f"{dirs['stats']}/resumen_expansion_upl_ha.csv"
+    
+    if os.path.exists(stats_csv):
+        build_report(
+            df_path=stats_csv,
+            map_html=map_html,
+            header_img1_path=HEADER_IMG1_PATH,
+            header_img2_path=HEADER_IMG2_PATH,
+            footer_img_path=FOOTER_IMG_PATH,
+            output_dir=dirs["reportes"],
+            month=month_str,
+            year=anio,
+            mes_num=int(args.mes)
+        )
+    else:
+        print(f"⏭️ No se detectó expansión urbana para {month_str} {anio}")
+        print(f"📄 Generando reporte sin expansión...")
+        # Crear reporte básico indicando que no hubo expansión
+        from src.pipeline_utils import build_no_expansion_report
+        build_no_expansion_report(
+            header_img1_path=HEADER_IMG1_PATH,
+            header_img2_path=HEADER_IMG2_PATH,
+            footer_img_path=FOOTER_IMG_PATH,
+            output_dir=dirs["reportes"],
+            month=month_str,
+            year=anio,
+            mes_num=int(args.mes)
+        )
 
     # === Subir carpeta completa a GCS ===
     def upload_folder_to_gcs(local_folder, gcs_bucket, gcs_prefix):

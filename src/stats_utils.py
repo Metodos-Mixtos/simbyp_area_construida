@@ -84,15 +84,15 @@ def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output
     print(f"✅ Intersecciones generadas correctamente para {base_name}.")
 
 
-def calculate_expansion_areas(input_dir, output_dir, upl_path, prefix="", file_suffix="new_urban"):
-
+def calculate_expansion_areas(input_dir, output_dir, upl_path):
+    """Calcula áreas de expansión por UPL"""
     crs = "EPSG:9377"
-    path_no = os.path.join(input_dir, f"{file_suffix}_no_intersections.geojson")
-    path_inter = os.path.join(input_dir, f"{file_suffix}_intersections.geojson")
+    path_no = os.path.join(input_dir, "new_urban_no_intersections.geojson")
+    path_inter = os.path.join(input_dir, "new_urban_intersections.geojson")
 
     # Verificar si los archivos existen (pueden no existir si no hubo expansión)
     if not os.path.exists(path_no) or not os.path.exists(path_inter):
-        print(f"⏭️ Omitiendo cálculo para {file_suffix}: archivos de intersección no existen (sin expansión detectada)")
+        print(f"⏭️ Omitiendo cálculo: archivos de intersección no existen (sin expansión detectada)")
         return
 
     gdf_no = gpd.read_file(path_no).to_crs(crs)
@@ -132,7 +132,7 @@ def calculate_expansion_areas(input_dir, output_dir, upl_path, prefix="", file_s
     )
     resumen["total_ha"] = resumen["interseccion_ha"] + resumen["no_interseccion_ha"]
 
-    out_csv = os.path.join(output_dir, f"resumen_expansion_upl_ha_{prefix.strip('_')}.csv") if prefix else os.path.join(output_dir, "resumen_expansion_upl_ha.csv")
+    out_csv = os.path.join(output_dir, "resumen_expansion_upl_ha.csv")
     resumen.to_csv(out_csv, index=False)
     print(f"✅ Guardado: {out_csv}")
     return resumen, None
