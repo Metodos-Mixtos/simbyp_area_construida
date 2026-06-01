@@ -39,7 +39,7 @@ COPY . .
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+ENV GOOGLE_CLOUD_PROJECT=bosques-bogota-416214
 
 # Entry point
 ENTRYPOINT ["python", "main.py"]
-CMD ["--anio", "2025", "--mes", "3"]
