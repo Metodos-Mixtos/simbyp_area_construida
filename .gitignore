@@ -78,6 +78,8 @@ data/
 *.PDF
 *.html
 *.htm
+# Exception: Keep template file
+!reporte/report_template.html
 *.png
 *.PNG
 *.jpg
