@@ -8,13 +8,13 @@ from rasterio.features import shapes
 from pathlib import Path
 from src.aux_utils import download_gcs_to_temp, TEMP_DATA_DIR
 
-def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output_dir):
+def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output_dir, anio, mes):
     """
     Convierte un raster binario de expansión urbana a polígonos,
     genera intersecciones con SAC, Reserva y EEP,
     y maneja el caso en que no haya geometrías válidas.
     """
-    base_name = Path(new_urban_tif).stem
+    base_name = f"new_urban_{anio}_{mes:02d}"
 
     with rasterio.open(new_urban_tif) as src:
         data = src.read(1)
@@ -84,11 +84,11 @@ def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output
     print(f"✅ Intersecciones generadas correctamente para {base_name}.")
 
 
-def calculate_expansion_areas(input_dir, output_dir, upl_path):
+def calculate_expansion_areas(input_dir, output_dir, upl_path, anio, mes):
     """Calcula áreas de expansión por UPL"""
     crs = "EPSG:9377"
-    path_no = os.path.join(input_dir, "new_urban_no_intersections.geojson")
-    path_inter = os.path.join(input_dir, "new_urban_intersections.geojson")
+    path_no = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_no_intersections.geojson")
+    path_inter = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_intersections.geojson")
 
     # Verificar si los archivos existen (pueden no existir si no hubo expansión)
     if not os.path.exists(path_no) or not os.path.exists(path_inter):
@@ -132,7 +132,7 @@ def calculate_expansion_areas(input_dir, output_dir, upl_path):
     )
     resumen["total_ha"] = resumen["interseccion_ha"] + resumen["no_interseccion_ha"]
 
-    out_csv = os.path.join(output_dir, "resumen_expansion_upl_ha.csv")
+    out_csv = os.path.join(output_dir, f"resumen_expansion_upl_ha_{anio}_{mes:02d}.csv")
     resumen.to_csv(out_csv, index=False)
     print(f"✅ Guardado: {out_csv}")
     return resumen, None

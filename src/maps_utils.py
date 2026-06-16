@@ -206,7 +206,10 @@ def export_sentinel_as_png(
     # Filtrar tiles que contienen expansión urbana
     if intersections_dir:
         expansion_geoms = []
-        normal_path = os.path.join(intersections_dir, "new_urban_intersections.geojson")
+        # Buscar archivos de intersecciones (pueden tener año/mes en el nombre)
+        import glob
+        normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
+        normal_path = normal_path[0] if normal_path else os.path.join(intersections_dir, "new_urban_intersections.geojson")
         
         if os.path.exists(normal_path):
             gdf_normal = gpd.read_file(normal_path).to_crs(epsg=4326)
@@ -406,7 +409,10 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     ).add_to(m)
 
     # Capas de expansión urbana
-    normal_path = os.path.join(intersections_dir, "new_urban_intersections.geojson")
+    # Buscar archivos de intersecciones (pueden tener año/mes en el nombre)
+    import glob
+    normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
+    normal_path = normal_path[0] if normal_path else os.path.join(intersections_dir, "new_urban_intersections.geojson")
     if os.path.exists(normal_path):
         gdf_norm = sanitize_gdf(gpd.read_file(normal_path).to_crs(epsg=4326))
         folium.GeoJson(json.loads(gdf_norm.to_json()), name="Expansión del área construida",
@@ -447,7 +453,7 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
     
-def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, year, sac, reserva, eep):
+def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, year, mes, sac, reserva, eep):
     """Genera mosaicos Sentinel y mapa interactivo usando PNG estáticos (optimizado)"""
     # Exportar imágenes Sentinel como PNG (solo tiles con expansión urbana)
     png_images = export_sentinel_as_png(
@@ -459,7 +465,7 @@ def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_
         lookback_days=365
     )
 
-    map_html = os.path.join(dirs["maps"], f"map_expansion.html")
+    map_html = os.path.join(dirs["maps"], f"map_expansion_{year}_{mes:02d}.html")
     plot_expansion_interactive(
         intersections_dir=dirs["intersections"],
         sac_path=sac,

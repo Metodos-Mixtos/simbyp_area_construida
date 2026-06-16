@@ -34,12 +34,12 @@ def prepare_folders(base_path, anio, mes):
     return dirs
 
 
-def process_dynamic_world(geometry, output_dir, last_day_prev, last_day_curr):
+def process_dynamic_world(geometry, output_dir, last_day_prev, last_day_curr, anio, mes):
     """Genera y exporta el mosaico de Dynamic World usando el umbral URB_PROB"""
     before = get_dw_mosaic_1year(last_day_prev, geometry)
     current = get_dw_mosaic_1year(last_day_curr, geometry)
 
-    label = "new_urban"
+    label = f"new_urban_{anio}_{mes:02d}"
     path = os.path.join(output_dir, f"{label}.tif")
     
     if not os.path.exists(path):
@@ -103,7 +103,14 @@ def build_report(df_path, map_html, header_img1_path, header_img2_path, footer_i
 
     base_dir = Path(output_dir)
     fecha_rango = f"{month}_{year}"
-    map_iframe_url = f"https://storage.googleapis.com/{GCS_OUTPUT_BUCKET}/{GCS_OUTPUT_PREFIX}/{year}_{mes_num:02d}/maps/map_expansion.html"
+    map_iframe_url = f"https://storage.googleapis.com/{GCS_OUTPUT_BUCKET}/{GCS_OUTPUT_PREFIX}/{year}_{mes_num:02d}/maps/map_expansion_{year}_{mes_num:02d}.html"
+    
+    # Nombres de archivos con año y mes para trazabilidad
+    tif_filename = f"new_urban_{year}_{mes_num:02d}.tif"
+    inter_geojson_filename = f"new_urban_{year}_{mes_num:02d}_intersections.geojson"
+    no_inter_geojson_filename = f"new_urban_{year}_{mes_num:02d}_no_intersections.geojson"
+    csv_filename = f"resumen_expansion_upl_ha_{year}_{mes_num:02d}.csv"
+    
     data = {
         "TITULO": "Reporte de expansión urbana en Bogotá",
         "FECHA_REPORTE": f"{month.capitalize()} {year}",
@@ -117,11 +124,15 @@ def build_report(df_path, map_html, header_img1_path, header_img2_path, footer_i
         "mes_num": f"{mes_num:02d}",
         "URB_PROB": URB_PROB,
         "URB_PROB_PERCENT": int(URB_PROB * 100),
-        "FUENTE": "Dynamic World, Google Earth Engine"
+        "FUENTE": "Dynamic World, Google Earth Engine",
+        "TIF_FILENAME": tif_filename,
+        "INTER_GEOJSON_FILENAME": inter_geojson_filename,
+        "NO_INTER_GEOJSON_FILENAME": no_inter_geojson_filename,
+        "CSV_FILENAME": csv_filename
     }
 
 
-    json_path = os.path.join(output_dir, "urban_sprawl_reporte.json")
+    json_path = os.path.join(output_dir, f"urban_sprawl_reporte_{year}_{month}.json")
     html_path = os.path.join(output_dir, f"urban_sprawl_reporte_{year}_{month}.html")
 
     with open(json_path, "w", encoding="utf-8") as f:
@@ -146,7 +157,7 @@ def build_no_expansion_report(header_img1_path, header_img2_path, footer_img_pat
     }
     
     os.makedirs(output_dir, exist_ok=True)
-    json_path = os.path.join(output_dir, "urban_sprawl_reporte.json")
+    json_path = os.path.join(output_dir, f"urban_sprawl_reporte_{year}_{month}.json")
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(report_data, f, ensure_ascii=False, indent=2)
     

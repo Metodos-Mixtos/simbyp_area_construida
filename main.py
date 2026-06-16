@@ -72,17 +72,17 @@ def main(anio: int, mes: int):
     geometry = load_geometry(AOI_PATH)
 
     # === 1. Dynamic World ===
-    dw_path = process_dynamic_world(geometry, dirs["dw"], last_day_prev, last_day_curr)
+    dw_path = process_dynamic_world(geometry, dirs["dw"], last_day_prev, last_day_curr, anio, mes)
 
     # === 2. Intersecciones ===
-    create_intersections(dw_path, SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"])
+    create_intersections(dw_path, SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"], anio, mes)
     
     # === 3. Estadísticas ===
-    calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH)
+    calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH, anio, mes)
 
     # === 4. Mapas Sentinel ===
     try:
-        map_html = generate_maps(AOI_PATH, last_day_prev, last_day_curr, dirs, month_str, previous_month_str, anio, SAC_PATH, RESERVA_PATH, EEP_PATH)
+        map_html = generate_maps(AOI_PATH, last_day_prev, last_day_curr, dirs, month_str, previous_month_str, anio, mes, SAC_PATH, RESERVA_PATH, EEP_PATH)
         print(f"✅ Mapa generado: {map_html}")
         if map_html and os.path.exists(map_html):
             print("Map file exists locally")
@@ -94,7 +94,7 @@ def main(anio: int, mes: int):
 
     # === 5. Reporte ===
     # Las imágenes se usan directamente desde GCS sin descargarlas
-    stats_csv = f"{dirs['stats']}/resumen_expansion_upl_ha.csv"
+    stats_csv = f"{dirs['stats']}/resumen_expansion_upl_ha_{anio}_{mes:02d}.csv"
     
     if os.path.exists(stats_csv):
         build_report(
