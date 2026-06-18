@@ -84,11 +84,40 @@ def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output
     print(f"✅ Intersecciones generadas correctamente para {base_name}.")
 
 
-def calculate_expansion_areas(input_dir, output_dir, upl_path, anio, mes):
-    """Calcula áreas de expansión por UPL"""
+def calculate_expansion_areas(input_dir, output_dir, upl_path, anio, mes, use_sar_filtered=False):
+    """
+    Calcula áreas de expansión por UPL
+    
+    Args:
+        input_dir: directorio con archivos de intersecciones
+        output_dir: directorio de salida
+        upl_path: ruta a archivo UPL
+        anio: año del análisis
+        mes: mes del análisis
+        use_sar_filtered: bool, default=False
+            - True: Usa archivos filtrados por SAR (*_sar_filtered.geojson)
+            - False: Usa archivos originales de DW (sin filtro SAR)
+            
+            Flujo del pipeline:
+            1. DW siempre se ejecuta primero (genera archivos base)
+            2. SAR intenta filtrar resultados de DW (opcional)
+            3. Si SAR falla o no está habilitado → usa archivos DW originales (False)
+            4. Si SAR tiene éxito → usa archivos filtrados por SAR (True)
+            
+            El valor False por defecto es el fallback seguro. 
+    """
     crs = "EPSG:9377"
-    path_no = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_no_intersections.geojson")
-    path_inter = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_intersections.geojson")
+    
+    # Determinar qué archivos usar
+    if use_sar_filtered:
+        path_no = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_no_intersections_sar_filtered.geojson")
+        path_inter = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_intersections_sar_filtered.geojson")
+        suffix = "_sar"
+        print("📊 Usando archivos filtrados por SAR para estadísticas")
+    else:
+        path_no = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_no_intersections.geojson")
+        path_inter = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_intersections.geojson")
+        suffix = ""
 
     # Verificar si los archivos existen (pueden no existir si no hubo expansión)
     if not os.path.exists(path_no) or not os.path.exists(path_inter):
@@ -132,7 +161,7 @@ def calculate_expansion_areas(input_dir, output_dir, upl_path, anio, mes):
     )
     resumen["total_ha"] = resumen["interseccion_ha"] + resumen["no_interseccion_ha"]
 
-    out_csv = os.path.join(output_dir, f"resumen_expansion_upl_ha_{anio}_{mes:02d}.csv")
+    out_csv = os.path.join(output_dir, f"resumen_expansion_upl_ha_{anio}_{mes:02d}{suffix}.csv")
     resumen.to_csv(out_csv, index=False)
     print(f"✅ Guardado: {out_csv}")
     return resumen, None

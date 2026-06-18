@@ -24,11 +24,19 @@ if credentials_path:
         print(f"  Por favor verifica la ruta en tu archivo .env")
         sys.exit(1)
 
-from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH, GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX
+from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH, GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX, USE_SAR_FILTER, SAR_PARAMS, SAR_LOOKBACK_T1_DAYS, SAR_LOOKBACK_T2_DAYS, SENTINELHUB_CLIENT_ID, SENTINELHUB_CLIENT_SECRET
 from src.aux_utils import authenticate_gee, load_geometry, set_dates, cleanup_temp_data
 from src.stats_utils import calculate_expansion_areas, create_intersections
 from src.pipeline_utils import prepare_folders, process_dynamic_world, build_report 
 from src.maps_utils import generate_maps
+
+# Importar módulo SAR (solo si está habilitado)
+if USE_SAR_FILTER:
+    from src.sar_filter import (
+        initialize_sentinel_hub_config,
+        filter_dw_polygons_with_sar,
+        apply_sar_filter_to_intersections
+    )
 
 # Suppress warnings
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL 1.1.1+")
@@ -77,12 +85,98 @@ def main(anio: int, mes: int):
     # === 2. Intersecciones ===
     create_intersections(dw_path, SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"], anio, mes)
     
-    # === 3. Estadísticas ===
-    calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH, anio, mes)
+    # === 3. Filtro SAR (NUEVO - opcional) ===
+    sar_filtered_applied = False
+    if USE_SAR_FILTER:
+        print("\n" + "="*70)
+        print("🛰️ FILTRO SAR HABILITADO")
+        print("="*70)
+        
+        # Verificar credenciales
+        if not SENTINELHUB_CLIENT_ID or not SENTINELHUB_CLIENT_SECRET:
+            print("⚠️ ADVERTENCIA: Credenciales de Sentinel Hub no configuradas")
+            print("   Añade SENTINELHUB_CLIENT_ID y SENTINELHUB_CLIENT_SECRET a tu .env")
+            print("   Continuando sin filtro SAR...")
+        else:
+            try:
+                # Inicializar Sentinel Hub
+                sar_config = initialize_sentinel_hub_config(
+                    client_id=SENTINELHUB_CLIENT_ID,
+                    client_secret=SENTINELHUB_CLIENT_SECRET
+                )
+                
+                # Buscar archivo de intersecciones para filtrar
+                import glob
+                inter_files = glob.glob(os.path.join(dirs["intersections"], "new_urban_*_intersections.geojson"))
+                
+                if inter_files:
+                    dw_inter_path = inter_files[0]
+                    print(f"📂 Archivo DW a filtrar: {os.path.basename(dw_inter_path)}")
+                    
+                    # Aplicar filtro SAR
+                    sar_filtered_path = filter_dw_polygons_with_sar(
+                        dw_geojson_path=dw_inter_path,
+                        output_dir=dirs["intersections"],
+                        last_day_prev=last_day_prev,
+                        last_day_curr=last_day_curr,
+                        sar_params=SAR_PARAMS,
+                        config=sar_config,
+                        lookback_t1_days=SAR_LOOKBACK_T1_DAYS,
+                        lookback_t2_days=SAR_LOOKBACK_T2_DAYS
+                    )
+                    
+                    if sar_filtered_path and os.path.exists(sar_filtered_path):
+                        # Aplicar filtro a todos los archivos de intersecciones
+                        print("\n📊 Aplicando filtro SAR a archivos de intersecciones...")
+                        apply_sar_filter_to_intersections(
+                            intersections_dir=dirs["intersections"],
+                            sar_filtered_path=sar_filtered_path,
+                            anio=anio,
+                            mes=mes
+                        )
+                        sar_filtered_applied = True
+                        print("✅ Filtro SAR aplicado exitosamente")
+                    elif sar_filtered_path is None:
+                        print("⚠️ SAR falló al descargar datos - continuando sin filtro SAR")
+                    else:
+                        print("⚠️ No se generó archivo SAR filtrado")
+                else:
+                    print("⚠️ No se encontraron archivos de intersecciones DW")
+                    
+            except Exception as e:
+                print(f"\n❌ Error en filtro SAR: {e}")
+                print("⚠️ Continuando sin filtro SAR...")
+                import traceback
+                traceback.print_exc()
+    else:
+        print("\n⏭️ Filtro SAR deshabilitado (USE_SAR_FILTER=False)")
+    
+    # === 4. Estadísticas ===
+    # Usar archivos filtrados por SAR si están disponibles
+    if sar_filtered_applied:
+        print("\n📊 Calculando estadísticas con datos filtrados por SAR...")
+        # Las estadísticas usarán automáticamente los archivos _sar_filtered.geojson
+        # porque buscan por patrón de nombre
+    
+    calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH, anio, mes, use_sar_filtered=sar_filtered_applied)
 
-    # === 4. Mapas Sentinel ===
+    # === 5. Mapas Sentinel ===
+    # Usar archivos SAR filtrados para descarga de tiles si están disponibles
     try:
-        map_html = generate_maps(AOI_PATH, last_day_prev, last_day_curr, dirs, month_str, previous_month_str, anio, mes, SAC_PATH, RESERVA_PATH, EEP_PATH)
+        map_html = generate_maps(
+            aoi_path=AOI_PATH,
+            bounds_prev=last_day_prev,
+            bounds_curr=last_day_curr,
+            dirs=dirs,
+            month_str=month_str,
+            previous_month_str=previous_month_str,
+            year=anio,
+            mes=mes,
+            sac=SAC_PATH,
+            reserva=RESERVA_PATH,
+            eep=EEP_PATH,
+            use_sar_filtered=sar_filtered_applied  # Usar archivos SAR si existen
+        )
         print(f"✅ Mapa generado: {map_html}")
         if map_html and os.path.exists(map_html):
             print("Map file exists locally")
@@ -92,9 +186,11 @@ def main(anio: int, mes: int):
         print(f"❌ Error generando mapa: {e}")
         map_html = None
 
-    # === 5. Reporte ===
+    # === 6. Reporte ===
     # Las imágenes se usan directamente desde GCS sin descargarlas
-    stats_csv = f"{dirs['stats']}/resumen_expansion_upl_ha_{anio}_{mes:02d}.csv"
+    # Usar archivo SAR si está disponible
+    csv_suffix = "_sar" if sar_filtered_applied else ""
+    stats_csv = f"{dirs['stats']}/resumen_expansion_upl_ha_{anio}_{mes:02d}{csv_suffix}.csv"
     
     if os.path.exists(stats_csv):
         build_report(

@@ -175,7 +175,8 @@ def export_sentinel_as_png(
     output_dir: str,
     intersections_dir: str = None,
     lookback_days: int = 365,
-    n_tiles: int = 6
+    n_tiles: int = 6,
+    use_sar_filtered: bool = False
 ):
     """
     Exporta imágenes Sentinel-2 como mosaico de PNGs a 10m/píxel.
@@ -208,8 +209,21 @@ def export_sentinel_as_png(
         expansion_geoms = []
         # Buscar archivos de intersecciones (pueden tener año/mes en el nombre)
         import glob
-        normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
-        normal_path = normal_path[0] if normal_path else os.path.join(intersections_dir, "new_urban_intersections.geojson")
+        
+        # Priorizar archivos SAR filtrados si use_sar_filtered=True
+        if use_sar_filtered:
+            sar_paths = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections_sar_filtered.geojson"))
+            if sar_paths:
+                normal_path = sar_paths[0]
+                print(f"📊 Usando polígonos SAR filtrados para optimización de tiles: {os.path.basename(normal_path)}")
+            else:
+                # Fallback a archivos originales si no hay SAR
+                normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
+                normal_path = normal_path[0] if normal_path else os.path.join(intersections_dir, "new_urban_intersections.geojson")
+                print(f"⚠️ No se encontraron archivos SAR filtrados, usando originales")
+        else:
+            normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
+            normal_path = normal_path[0] if normal_path else os.path.join(intersections_dir, "new_urban_intersections.geojson")
         
         if os.path.exists(normal_path):
             gdf_normal = gpd.read_file(normal_path).to_crs(epsg=4326)
@@ -323,7 +337,7 @@ def export_sentinel_as_png(
         "bounds": [[miny, minx], [maxy, maxx]]  # bounds completos del AOI
     }
 
-def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path=None, tiles_before=None, tiles_current=None, png_images=None):
+def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path=None, tiles_before=None, tiles_current=None, png_images=None, use_sar_filtered=False):
     
     """Generar mapa interactivo de expansión urbana con folium."""
 
@@ -411,8 +425,18 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     # Capas de expansión urbana
     # Buscar archivos de intersecciones (pueden tener año/mes en el nombre)
     import glob
-    normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
-    normal_path = normal_path[0] if normal_path else os.path.join(intersections_dir, "new_urban_intersections.geojson")
+    
+    # Priorizar archivos SAR filtrados si use_sar_filtered=True
+    if use_sar_filtered:
+        sar_paths = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections_sar_filtered.geojson"))
+        normal_path = sar_paths[0] if sar_paths else None
+        if not normal_path:
+            # Fallback a archivos originales
+            normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
+            normal_path = normal_path[0] if normal_path else os.path.join(intersections_dir, "new_urban_intersections.geojson")
+    else:
+        normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
+        normal_path = normal_path[0] if normal_path else os.path.join(intersections_dir, "new_urban_intersections.geojson")
     if os.path.exists(normal_path):
         gdf_norm = sanitize_gdf(gpd.read_file(normal_path).to_crs(epsg=4326))
         folium.GeoJson(json.loads(gdf_norm.to_json()), name="Expansión del área construida",
@@ -453,7 +477,7 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
     
-def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, year, mes, sac, reserva, eep):
+def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, year, mes, sac, reserva, eep, use_sar_filtered=False):
     """Genera mosaicos Sentinel y mapa interactivo usando PNG estáticos (optimizado)"""
     # Exportar imágenes Sentinel como PNG (solo tiles con expansión urbana)
     png_images = export_sentinel_as_png(
@@ -462,7 +486,8 @@ def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_
         end_t2=bounds_curr.strftime("%Y-%m-%d"),
         output_dir=dirs["maps"],
         intersections_dir=dirs["intersections"],  # Pasar directorio para filtrar tiles
-        lookback_days=365
+        lookback_days=365,
+        use_sar_filtered=use_sar_filtered  # Usar archivos SAR filtrados si existen
     )
 
     map_html = os.path.join(dirs["maps"], f"map_expansion_{year}_{mes:02d}.html")
@@ -476,6 +501,7 @@ def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_
         month_str=month_str, 
         previous_month_str=previous_month_str,
         year=year,
-        png_images=png_images
+        png_images=png_images,
+        use_sar_filtered=use_sar_filtered  # Pasar parámetro para mostrar polígonos SAR
     )
     return map_html

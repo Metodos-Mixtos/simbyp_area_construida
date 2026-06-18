@@ -9,3 +9,8 @@ pandas
 rasterio
 folium
 google-cloud-storage
+google-cloud-secret-manager
+sentinelhub
+scipy
+scikit-image
+numpy

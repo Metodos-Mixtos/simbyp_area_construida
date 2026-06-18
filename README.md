@@ -9,6 +9,7 @@ Este proyecto analiza la expansión urbana mensual en el área de Bogotá median
 ## Características
 
 - Procesamiento automatizado de imágenes satelitales Dynamic World
+- **NUEVO: Filtro SAR de Sentinel-1 para validación de expansión urbana**
 - Análisis de expansión urbana mensual
 - Generación de mapas interactivos con Sentinel-2
 - Cálculo de estadísticas de área construida
@@ -61,6 +62,126 @@ python main.py --anio 2025 --mes 12
 python main.py --anio 2025 --mes 12
 ```
 
+## Filtro SAR (Sentinel-1)
+
+### ¿Qué es y por qué usarlo?
+
+El filtro SAR es una capa adicional de validación que utiliza datos de **Sentinel-1 SAR (Synthetic Aperture Radar)** para reducir falsos positivos en la detección de expansión urbana de Dynamic World.
+
+**Ventajas:**
+- Reduce falsos positivos causados por nubes, sombras o cambios temporales
+- Detecta estructuras físicas reales (SAR penetra nubes)
+- Valida construcciones usando retrodispersión VV/VH
+- Se aplica solo en áreas detectadas por DW (ahorra unidades de procesamiento)
+
+### Configuración
+
+#### 1. Obtener credenciales de Copernicus Dataspace
+
+1. Crear cuenta en [Copernicus Dataspace](https://dataspace.copernicus.eu/)
+2. Ir a **Dashboard → User Settings → OAuth clients**
+3. Crear nuevo OAuth client
+4. Copiar `CLIENT_ID` y `CLIENT_SECRET`
+
+#### 2. Configurar variables de entorno
+
+Añadir al archivo `.env`:
+
+```bash
+# Credenciales Sentinel Hub (Copernicus Dataspace)
+SENTINELHUB_CLIENT_ID=tu-client-id-aqui
+SENTINELHUB_CLIENT_SECRET=tu-client-secret-aqui
+```
+
+#### 3. Habilitar/deshabilitar filtro SAR
+
+En `src/config.py`:
+
+```python
+# Habilitar filtro SAR
+USE_SAR_FILTER = True  # True = aplica filtro, False = solo DW
+
+# Configuración temporal
+SAR_LOOKBACK_T1_DAYS = 90   # t1: trimestral (verificar ausencia de construcciones)
+SAR_LOOKBACK_T2_DAYS = 30   # t2: mensual (verificar construcción actual)
+```
+
+### Parámetros SAR
+
+Los parámetros de clasificación urbana SAR se configuran en `src/config.py`:
+
+```python
+SAR_PARAMS = {
+    # Umbrales de clasificación (valores en dB)
+    'vv_threshold': -12,        # VV > -12 dB indica superficies rugosas/urbanas
+    'vh_threshold': -18,        # VH > -18 dB complementa detección
+    
+    # Ratio VV/VH
+    'use_ratio': True,          # Usar ratio para mejorar precisión
+    'vv_vh_ratio_min': 1.0,     # Ratio mínimo característico de áreas urbanas
+    'vv_vh_ratio_max': 9.5,     # Ratio máximo
+    
+    # Filtros morfológicos
+    'erosion_size': 3,          # Elimina píxeles aislados
+    'dilation_size': 2,         # Rellena huecos pequeños
+    
+    # Área mínima
+    'min_cluster_pixels': 5,    # 500 m² mínimo (5 píxeles a 10m)
+    'min_cluster_area_ha': 0.05
+}
+```
+
+### Flujo de procesamiento con SAR
+
+```
+1. Dynamic World → Detecta expansión inicial
+                ↓
+2. Intersecciones → Cruza con áreas protegidas
+                ↓
+3. Filtro SAR → Valida con datos Sentinel-1
+   ├─ Descarga SAR t1 (trimestral) y t2 (mensual)
+   ├─ Clasifica áreas urbanas (VV, VH, ratio)
+   ├─ Detecta expansión (t2 AND NOT t1)
+   └─ Filtra polígonos DW
+                ↓
+4. Estadísticas → Calcula áreas validadas
+                ↓
+5. Mapas y reportes → Visualización final
+```
+
+### Outputs con filtro SAR
+
+Cuando el filtro SAR está activo, se generan archivos adicionales:
+
+```
+outputs/YYYY_MM/
+├── intersections/
+│   ├── new_urban_YYYY_MM_intersections.geojson              # DW original
+│   ├── new_urban_YYYY_MM_intersections_sar_filtered.geojson # SAR validado
+│   ├── new_urban_YYYY_MM_no_intersections.geojson
+│   └── new_urban_YYYY_MM_no_intersections_sar_filtered.geojson
+└── stats/
+    ├── resumen_expansion_upl_ha_YYYY_MM.csv                 # DW original
+    └── resumen_expansion_upl_ha_YYYY_MM_sar.csv             # SAR validado
+```
+
+### Desactivar filtro SAR
+
+Si no deseas usar el filtro SAR (por ejemplo, durante pruebas o si no tienes credenciales):
+
+1. En `src/config.py`, cambiar:
+   ```python
+   USE_SAR_FILTER = False
+   ```
+
+2. El pipeline funcionará normalmente solo con Dynamic World
+
+### Limitaciones
+
+- **Unidades de procesamiento**: Sentinel Hub tiene límites mensuales gratuitos (~1000 unidades)
+- **Tiempo de procesamiento**: Añade 2-5 minutos por análisis mensual
+- **Cobertura**: Requiere datos Sentinel-1 disponibles para el área y fechas
+
 ## Estructura del Proyecto
 
 ```
@@ -73,7 +194,8 @@ simbyp_area_construida/
 │   ├── aux_utils.py          # Utilidades auxiliares
 │   ├── maps_utils.py         # Generación de mapas
 │   ├── pipeline_utils.py     # Pipeline de procesamiento
-│   └── stats_utils.py        # Cálculo de estadísticas
+│   ├── stats_utils.py        # Cálculo de estadísticas
+│   └── sar_filter.py         # Filtro SAR de Sentinel-1
 └── reporte/
     ├── render_report.py      # Renderización de reportes
     └── report_template.html  # Plantilla HTML del reporte
@@ -83,18 +205,19 @@ simbyp_area_construida/
 
 El script genera las siguientes salidas en `BASE_PATH/urban_sprawl/outputs/YYYY_MM/`:
 
-- **dynamic_world/**: Imágenes procesadas de Dynamic World
-- **intersections/**: GeoJSON de intersecciones con áreas protegidas
-- **stats/**: Estadísticas en formato JSON y CSV
+- **dw/**: Imágenes procesadas de Dynamic World
+- **intersections/**: GeoJSON de intersecciones con áreas protegidas (incluye versiones filtradas por SAR si está habilitado)
+- **stats/**: Estadísticas en formato JSON y CSV (incluye versiones SAR si está habilitado)
 - **maps/**: Mapas interactivos en HTML
-- **reportes/**: Reportes finales en PDF
+- **reportes/**: Reportes finales en HTML
 
 ## Seguridad
 
 - **NUNCA** subir el archivo `.env` al repositorio
-- Mantener las credenciales de Google Cloud seguras
+- Mantener las credenciales de Google Cloud **Y Sentinel Hub** seguras
 - Usar service accounts con permisos mínimos necesarios
 - Rotar credenciales regularmente
+- Las credenciales de Sentinel Hub son gratuitas pero tienen límites de uso
 
 ## Despliegue en Google Cloud Run
 
