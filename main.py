@@ -32,7 +32,6 @@ from src.maps_utils import generate_maps
 
 # Importar módulo SAR (solo si está habilitado)
 if USE_SAR_FILTER:
-    # Volver a SentinelHub Processing API (soporta gamma0-terrain RTC)
     from src.sar_filter import (
         initialize_sentinel_hub_config,
         filter_dw_polygons_with_sar,
@@ -194,17 +193,55 @@ def main(anio: int, mes: int):
     stats_csv = f"{dirs['stats']}/resumen_expansion_upl_ha_{anio}_{mes:02d}{csv_suffix}.csv"
     
     if os.path.exists(stats_csv):
-        build_report(
-            df_path=stats_csv,
-            map_html=map_html,
-            header_img1_path=HEADER_IMG1_PATH,
-            header_img2_path=HEADER_IMG2_PATH,
-            footer_img_path=FOOTER_IMG_PATH,
-            output_dir=dirs["reportes"],
-            month=month_str,
-            year=anio,
-            mes_num=int(args.mes)
-        )
+        # Verificar si el CSV tiene datos (SAR pudo rechazar todo)
+        import pandas as pd
+        try:
+            df = pd.read_csv(stats_csv)
+            if len(df) == 0 or df['area_ha'].sum() == 0:
+                # CSV existe pero no hay datos (SAR rechazó todo)
+                print(f"⚠️ SAR rechazó toda la expansión detectada por DW en {month_str} {anio}")
+                print(f"📄 Generando reporte indicando validación SAR sin confirmaciones...")
+                from src.pipeline_utils import build_no_expansion_report
+                build_no_expansion_report(
+                    header_img1_path=HEADER_IMG1_PATH,
+                    header_img2_path=HEADER_IMG2_PATH,
+                    footer_img_path=FOOTER_IMG_PATH,
+                    output_dir=dirs["reportes"],
+                    month=month_str,
+                    year=anio,
+                    mes_num=int(args.mes),
+                    custom_message={
+                        'title': 'SAR no confirmó la expansión detectada por Dynamic World.',
+                        'body': f'Durante el periodo de {month_str} {anio}, Dynamic World identificó cambios en coberturas que podrían indicar expansión urbana. Sin embargo, la validación con datos SAR de Sentinel-1 (radar) no confirmó construcciones físicas en esas áreas, por lo que fueron descartadas.'
+                    }
+                )
+            else:
+                # CSV tiene datos, generar reporte normal
+                build_report(
+                    df_path=stats_csv,
+                    map_html=map_html,
+                    header_img1_path=HEADER_IMG1_PATH,
+                    header_img2_path=HEADER_IMG2_PATH,
+                    footer_img_path=FOOTER_IMG_PATH,
+                    output_dir=dirs["reportes"],
+                    month=month_str,
+                    year=anio,
+                    mes_num=int(args.mes)
+                )
+        except Exception as e:
+            print(f"⚠️ Error leyendo CSV: {e}")
+            # Si hay error leyendo CSV, intentar generar reporte normal
+            build_report(
+                df_path=stats_csv,
+                map_html=map_html,
+                header_img1_path=HEADER_IMG1_PATH,
+                header_img2_path=HEADER_IMG2_PATH,
+                footer_img_path=FOOTER_IMG_PATH,
+                output_dir=dirs["reportes"],
+                month=month_str,
+                year=anio,
+                mes_num=int(args.mes)
+            )
     else:
         print(f"⏭️ No se detectó expansión urbana para {month_str} {anio}")
         print(f"📄 Generando reporte sin expansión...")
@@ -241,15 +278,13 @@ def main(anio: int, mes: int):
                 blob.upload_from_filename(local_path)
                 print(f"✅ Subido {local_path} a gs://{gcs_bucket}/{gcs_path}")
 
-    # TODO: Dar permisos a earth-engine-urban-sprawl@watchful-slice-493320-e0.iam.gserviceaccount.com
-    # en el bucket desarrollo-reportes-simbyp para habilitar upload
-    # print("☁️ Subiendo outputs a GCS...")
-    # fecha_rango = f"{anio}_{mes:02d}"
-    # upload_folder_to_gcs(OUTPUT_FOLDER, GCS_OUTPUT_BUCKET, f"{GCS_OUTPUT_PREFIX}/{fecha_rango}")
+    print("☁️ Subiendo outputs a GCS...")
+    fecha_rango = f"{anio}_{mes:02d}"
+    upload_folder_to_gcs(OUTPUT_FOLDER, GCS_OUTPUT_BUCKET, f"{GCS_OUTPUT_PREFIX}/{fecha_rango}")
 
     print("✅ Proceso completo. Archivos guardados en:")
     print(f"   - Local: {OUTPUT_FOLDER}")
-    # print(f"   - GCS: gs://{GCS_OUTPUT_BUCKET}/{GCS_OUTPUT_PREFIX}/{fecha_rango}/")
+    print(f"   - GCS: gs://{GCS_OUTPUT_BUCKET}/{GCS_OUTPUT_PREFIX}/{fecha_rango}/")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pipeline de expansión urbana mensual (mosaico 1 año atrás)")

@@ -190,8 +190,21 @@ def build_report(df_path, map_html, header_img1_path, header_img2_path, footer_i
     print(f"✅ Reporte generado: {html_path}")
 
 
-def build_no_expansion_report(header_img1_path, header_img2_path, footer_img_path, output_dir, month, year, mes_num):
-    """Genera reporte HTML simple cuando no se detectó expansión urbana"""
+def build_no_expansion_report(header_img1_path, header_img2_path, footer_img_path, output_dir, month, year, mes_num, custom_message=None):
+    """Genera reporte HTML simple cuando no se detectó expansión urbana
+    
+    Args:
+        custom_message: dict opcional con 'title' y 'body' para personalizar mensaje
+                       Ej: {'title': 'SAR no confirmó...', 'body': 'Texto explicativo'}
+    """
+    
+    # Mensaje por defecto si no se proporciona custom_message
+    if custom_message is None:
+        title_text = "Para el mes analizado no se detectó expansión urbana."
+        body_text = f"Durante el periodo de {month.capitalize()} {year}, no se identificaron cambios significativos en las coberturas que indiquen procesos de expansión urbana en el área de estudio según los criterios metodológicos establecidos."
+    else:
+        title_text = custom_message.get('title', 'No se detectó expansión urbana.')
+        body_text = custom_message.get('body', f'Durante el periodo de {month.capitalize()} {year}, no se identificaron cambios significativos.')
     
     # Crear JSON con información básica
     report_data = {
@@ -199,7 +212,7 @@ def build_no_expansion_report(header_img1_path, header_img2_path, footer_img_pat
         "anio": year,
         "mes_num": f"{mes_num:02d}",
         "expansion_detectada": False,
-        "mensaje": "No se detectó expansión urbana significativa en este período"
+        "mensaje": title_text
     }
     
     os.makedirs(output_dir, exist_ok=True)
@@ -254,8 +267,8 @@ def build_no_expansion_report(header_img1_path, header_img2_path, footer_img_pat
     <div class="note">{month.capitalize()} {year}</div> 
 
     <div class="message-box">
-      <p><strong>Para el mes analizado no se detectó expansión urbana.</strong></p>
-      <p>Durante el periodo de {month.capitalize()} {year}, no se identificaron cambios significativos en las coberturas que indiquen procesos de expansión urbana en el área de estudio según los criterios metodológicos establecidos.</p>
+      <p><strong>{title_text}</strong></p>
+      <p>{body_text}</p>
     </div>
 
     <section>
