@@ -105,12 +105,10 @@ def get_tiles_from_ee(
                 .filterBounds(geom)
                 .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
                 .select(sel)
-                .sort("system:time_start", False)
-                .sort("system:index")
             )
 
-            # Tomar el mosaico más limpio del período
-            image = collection.mosaic().clip(geom)
+            # Tomar la mediana del período (reduce nubes y ruido)
+            image = collection.median().clip(geom)
             return image.getMapId(vis)["tile_fetcher"].url_format
 
     elif dataset == "DW":
@@ -134,11 +132,9 @@ def get_tiles_from_ee(
                 .filterDate(start_ee, end_ee)
                 .filterBounds(geom)
                 .select(sel)
-                .sort("system:time_start", False)
-                .sort("system:index")
             )
 
-            image = collection.mosaic().clip(geom)
+            image = collection.median().clip(geom)
             return image.getMapId(vis)["tile_fetcher"].url_format
 
     else:
@@ -287,11 +283,9 @@ def export_sentinel_as_png(
             .filterBounds(geom)
             .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
             .select(sel)
-            .sort("system:time_start", False)
-            .sort("system:index")
         )
 
-        image = collection.mosaic().clip(geom)
+        image = collection.median().clip(geom)
         
         # Obtener URL con escala de 10m/píxel
         url = image.getThumbURL({

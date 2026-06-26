@@ -67,9 +67,17 @@ def get_secret_from_gcp(secret_id, project_id=None):
 SENTINELHUB_CLIENT_ID = get_secret_from_gcp("sentinelhub-client-id")
 SENTINELHUB_CLIENT_SECRET = get_secret_from_gcp("sentinelhub-client-secret")
 
-# Configuración temporal SAR
-SAR_LOOKBACK_T1_DAYS = 90   # t1: trimestral (90 días) - verificar que no había construcciones
-SAR_LOOKBACK_T2_DAYS = 30   # t2: mensual (30 días) - verificar construcción actual
+# ============================================
+# CONFIGURACIÓN TEMPORAL (DW Y SAR)
+# ============================================
+
+# Dynamic World lookback days
+DW_LOOKBACK_T1_DAYS = 90    # t1: 90 días lookback (período de referencia más largo)
+DW_LOOKBACK_T2_DAYS = 30    # t2: 30 días lookback (construcción reciente)
+
+# SAR / Sentinel-1 lookback days 
+SAR_LOOKBACK_T1_DAYS = 30   # t1: 30 días lookback 
+SAR_LOOKBACK_T2_DAYS = 30   # t2: 30 días lookback
 
 # Parámetros de clasificación urbana SAR
 SAR_PARAMS = {
@@ -80,7 +88,7 @@ SAR_PARAMS = {
     # Ratio VV/VH (en dB, ratio = VV - VH)
     'use_ratio': True,          # True = usa ratio VV/VH, False = solo umbrales individuales
     'vv_vh_ratio_min': 1.0,     # Ratio mínimo para áreas urbanas
-    'vv_vh_ratio_max': 9.5,     # Ratio máximo para áreas urbanas
+    'vv_vh_ratio_max': 10.0,     # Ratio máximo para áreas urbanas
     
     # Filtros morfológicos (limpieza de ruido)
     'erosion_size': 3,          # Iteraciones de erosión (elimina píxeles aislados)
@@ -90,5 +98,3 @@ SAR_PARAMS = {
     'min_cluster_pixels': 5,    # Mínimo 5 píxeles (500 m² a 10m resolución)
     'min_cluster_area_ha': 0.05 # 0.05 ha = 500 m²
 }
-
-

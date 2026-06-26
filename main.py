@@ -32,6 +32,7 @@ from src.maps_utils import generate_maps
 
 # Importar módulo SAR (solo si está habilitado)
 if USE_SAR_FILTER:
+    # Volver a SentinelHub Processing API (soporta gamma0-terrain RTC)
     from src.sar_filter import (
         initialize_sentinel_hub_config,
         filter_dw_polygons_with_sar,
@@ -99,7 +100,7 @@ def main(anio: int, mes: int):
             print("   Continuando sin filtro SAR...")
         else:
             try:
-                # Inicializar Sentinel Hub
+                # Inicializar Sentinel Hub con credenciales CDSE
                 sar_config = initialize_sentinel_hub_config(
                     client_id=SENTINELHUB_CLIENT_ID,
                     client_secret=SENTINELHUB_CLIENT_SECRET
@@ -113,7 +114,7 @@ def main(anio: int, mes: int):
                     dw_inter_path = inter_files[0]
                     print(f"📂 Archivo DW a filtrar: {os.path.basename(dw_inter_path)}")
                     
-                    # Aplicar filtro SAR
+                    # Aplicar filtro SAR con SentinelHub (gamma0-terrain RTC)
                     sar_filtered_path = filter_dw_polygons_with_sar(
                         dw_geojson_path=dw_inter_path,
                         output_dir=dirs["intersections"],
@@ -240,13 +241,15 @@ def main(anio: int, mes: int):
                 blob.upload_from_filename(local_path)
                 print(f"✅ Subido {local_path} a gs://{gcs_bucket}/{gcs_path}")
 
-    print("☁️ Subiendo outputs a GCS...")
-    fecha_rango = f"{anio}_{mes:02d}"
-    upload_folder_to_gcs(OUTPUT_FOLDER, GCS_OUTPUT_BUCKET, f"{GCS_OUTPUT_PREFIX}/{fecha_rango}")
+    # TODO: Dar permisos a earth-engine-urban-sprawl@watchful-slice-493320-e0.iam.gserviceaccount.com
+    # en el bucket desarrollo-reportes-simbyp para habilitar upload
+    # print("☁️ Subiendo outputs a GCS...")
+    # fecha_rango = f"{anio}_{mes:02d}"
+    # upload_folder_to_gcs(OUTPUT_FOLDER, GCS_OUTPUT_BUCKET, f"{GCS_OUTPUT_PREFIX}/{fecha_rango}")
 
     print("✅ Proceso completo. Archivos guardados en:")
     print(f"   - Local: {OUTPUT_FOLDER}")
-    print(f"   - GCS: gs://{GCS_OUTPUT_BUCKET}/{GCS_OUTPUT_PREFIX}/{fecha_rango}/")
+    # print(f"   - GCS: gs://{GCS_OUTPUT_BUCKET}/{GCS_OUTPUT_PREFIX}/{fecha_rango}/")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pipeline de expansión urbana mensual (mosaico 1 año atrás)")

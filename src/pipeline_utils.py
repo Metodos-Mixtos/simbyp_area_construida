@@ -5,22 +5,30 @@ import pandas as pd
 from pathlib import Path
 
 from src.aux_utils import export_image, make_relative_path
-from src.config import GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX, URB_PROB
+from src.config import GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX, URB_PROB, DW_LOOKBACK_T1_DAYS, DW_LOOKBACK_T2_DAYS
 from reporte.render_report import render
 
-def get_dw_mosaic_1year(end_date, geometry):
-    """Mosaico de Dynamic World (built) de los últimos 365 días hasta end_date."""
+def get_dw_composite(end_date, geometry, lookback_days=30):
+    """
+    Composición mediana de Dynamic World (built) usando lookback configurable.
+    
+    Args:
+        end_date: Fecha final del período
+        geometry: Geometría del AOI
+        lookback_days: Días hacia atrás desde end_date (default: 30)
+    
+    Returns:
+        Imagen compuesta mediana de la banda 'built'
+    """
     end = ee.Date(end_date.strftime("%Y-%m-%d"))
-    start = end.advance(-365, "day")
+    start = end.advance(-lookback_days, "day")
     collection = (
         ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
         .filterDate(start, end)
         .filterBounds(geometry)
         .select("built")
-        .sort("system:time_start", False)
-        .sort("system:index")
     )
-    return collection.mosaic().clip(geometry)
+    return collection.median().clip(geometry)
 
 def prepare_folders(base_path, anio, mes):
     """Crea los directorios de salida organizados por componente"""
@@ -35,9 +43,36 @@ def prepare_folders(base_path, anio, mes):
 
 
 def process_dynamic_world(geometry, output_dir, last_day_prev, last_day_curr, anio, mes):
-    """Genera y exporta el mosaico de Dynamic World usando el umbral URB_PROB"""
-    before = get_dw_mosaic_1year(last_day_prev, geometry)
-    current = get_dw_mosaic_1year(last_day_curr, geometry)
+    """
+    Genera y exporta la detección de expansión urbana usando Dynamic World.
+    
+    Nueva lógica temporal para capturar construcciones progresivas:
+    - t2: último día del mes actual con lookback configurable (construcción reciente)
+    - t1: 90 días antes del INICIO de t2 con lookback configurable (verificar ausencia previa)
+    - Delta: 90 días de gap entre el FIN de t1 y el INICIO de t2
+    
+    Los valores de lookback se configuran en config.py:
+    - DW_LOOKBACK_T2_DAYS (default: 30 días)
+    - DW_LOOKBACK_T1_DAYS (default: 90 días)
+    
+    Esto permite detectar el proceso: suelo desnudo → limpieza → construcción
+    """
+    from datetime import timedelta
+    
+    # t2: período actual (lookback configurable)
+    t2_end = last_day_curr
+    start_t2 = t2_end - timedelta(days=DW_LOOKBACK_T2_DAYS)
+    current = get_dw_composite(t2_end, geometry, lookback_days=DW_LOOKBACK_T2_DAYS)
+    
+    # t1: 90 días antes del INICIO de t2 (lookback configurable)
+    t1_end = start_t2 - timedelta(days=90)
+    before = get_dw_composite(t1_end, geometry, lookback_days=DW_LOOKBACK_T1_DAYS)
+    
+    print(f"\n📅 Períodos DW:")
+    print(f"   t1: {(t1_end - timedelta(days=DW_LOOKBACK_T1_DAYS)).strftime('%Y-%m-%d')} a {t1_end.strftime('%Y-%m-%d')} ({DW_LOOKBACK_T1_DAYS} días lookback)")
+    print(f"   t2: {start_t2.strftime('%Y-%m-%d')} a {t2_end.strftime('%Y-%m-%d')} ({DW_LOOKBACK_T2_DAYS} días lookback)")
+    print(f"   Delta (gap): 90 días entre fin de t1 ({t1_end.strftime('%Y-%m-%d')}) e inicio de t2 ({start_t2.strftime('%Y-%m-%d')})")
+    print(f"   Composición: MEDIANA (reducción de ruido/nubes)")
 
     label = f"new_urban_{anio}_{mes:02d}"
     path = os.path.join(output_dir, f"{label}.tif")
@@ -90,16 +125,27 @@ def gcs_to_base64_data_uri(gcs_path):
 def build_report(df_path, map_html, header_img1_path, header_img2_path, footer_img_path, output_dir, month, year, mes_num):
     """Genera reporte final en JSON y HTML"""
     df = pd.read_csv(df_path)
-
-    df_top = df.nlargest(5, "interseccion_ha")
-    top_upls = [
-        {
-            "UPL": r["NOMBRE"],
-            "INTER_HA": round(r["interseccion_ha"], 2),
-            "TOTAL_HA": round(r["total_ha"], 2)
-        }
-        for _, r in df_top.iterrows()
-    ]
+    
+    # Convertir columnas numéricas
+    numeric_columns = ['interseccion_ha', 'no_interseccion_ha', 'total_ha']
+    for col in numeric_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    
+    # Verificar si hay datos válidos
+    if len(df) == 0 or df['interseccion_ha'].sum() == 0:
+        print("⚠️ No hay datos de expansión para generar reporte (posiblemente SAR rechazó todos los polígonos)")
+        top_upls = []
+    else:
+        df_top = df.nlargest(5, "interseccion_ha")
+        top_upls = [
+            {
+                "UPL": r["NOMBRE"],
+                "INTER_HA": round(r["interseccion_ha"], 2),
+                "TOTAL_HA": round(r["total_ha"], 2)
+            }
+            for _, r in df_top.iterrows()
+        ]
 
     base_dir = Path(output_dir)
     fecha_rango = f"{month}_{year}"

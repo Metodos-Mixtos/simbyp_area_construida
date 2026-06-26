@@ -106,6 +106,8 @@ SAR_LOOKBACK_T1_DAYS = 90   # t1: trimestral (verificar ausencia de construccion
 SAR_LOOKBACK_T2_DAYS = 30   # t2: mensual (verificar construcción actual)
 ```
 
+**Nota temporal:** Delta de 90 días entre el FIN de t1 y el INICIO de t2 para capturar construcciones progresivas.
+
 ### Parámetros SAR
 
 Los parámetros de clasificación urbana SAR se configuran en `src/config.py`:
@@ -134,20 +136,28 @@ SAR_PARAMS = {
 ### Flujo de procesamiento con SAR
 
 ```
-1. Dynamic World → Detecta expansión inicial
+1. Dynamic World → Detecta expansión inicial (mediana temporal)
                 ↓
 2. Intersecciones → Cruza con áreas protegidas
                 ↓
-3. Filtro SAR → Valida con datos Sentinel-1
-   ├─ Descarga SAR t1 (trimestral) y t2 (mensual)
+3. Filtro SAR → Validación con Sentinel-1 (optimizado por tiles)
+   ├─ Divide AOI en grid 12x12 (144 tiles para Bogotá)
+   ├─ Procesa solo tiles con expansión DW
+   ├─ Descarga SAR t1 y t2 (composición mediana)
    ├─ Clasifica áreas urbanas (VV, VH, ratio)
    ├─ Detecta expansión (t2 AND NOT t1)
-   └─ Filtra polígonos DW
+   ├─ Vectoriza y combina tiles
+   └─ Intersección geométrica DW ∩ SAR
                 ↓
 4. Estadísticas → Calcula áreas validadas
                 ↓
-5. Mapas y reportes → Visualización final
+5. Mapas y reportes → Visualización final (Sentinel-2 RGB mediana)
 ```
+
+**Características clave:**
+- **Composición mediana:** Reduce speckle (SAR) y nubes (óptico)
+- **Grid adaptativo:** 12x12 para AOIs grandes, 8x8 para medianos, 4x4 para pequeños
+- **Corrección terreno:** GAMMA0_TERRAIN con DEM Copernicus 30m
 
 ### Outputs con filtro SAR
 
@@ -176,11 +186,43 @@ Si no deseas usar el filtro SAR (por ejemplo, durante pruebas o si no tienes cre
 
 2. El pipeline funcionará normalmente solo con Dynamic World
 
-### Limitaciones
+### Limitaciones y Recomendaciones
 
-- **Unidades de procesamiento**: Sentinel Hub tiene límites mensuales gratuitos (~1000 unidades)
-- **Tiempo de procesamiento**: Añade 2-5 minutos por análisis mensual
-- **Cobertura**: Requiere datos Sentinel-1 disponibles para el área y fechas
+**Processing Units (PU):**
+- Cuota gratuita: 10,000 PU/mes + 300 PU/minuto
+- Si excedes límites: Crear nueva cuenta o aumentar lookback delay
+Herramientas Adicionales
+
+### Exportar visualización SAR de tile individual
+
+Para inspección visual y debug, puedes exportar datos SAR de un tile específico:
+
+```bash
+# Ver tiles con expansión DW
+python export_sar_visualization.py --date 2025-04-30 --list-tiles
+
+# Exportar tile específico (GeoTIFF para QGIS)
+python export_sar_visualization.py --date 2025-04-30 --lookback 30 --tile "11,8" --no-png
+```
+
+**Outputs:**
+- `sar_visualization_YYYYMMDD.tif`: GeoTIFF con 4 bandas (VV, VH, Mask, Urban)
+- `sar_visualization_YYYYMMDD.p     # Script principal
+├── export_sar_visualization.py     # Exportar SAR de tiles individuales (debug)
+├── requirement.txt                 # Dependencias del proyecto
+├── .env                            # Variables de entorno
+├── src/
+│   ├── config.py                   # Configuración y parámetros SAR/DW
+│   ├── aux_utils.py                # Utilidades auxiliares
+│   ├── maps_utils.py               # Generación de mapas (Sentinel-2 RGB)
+│   ├── pipeline_utils.py           # Pipeline Dynamic World
+│   ├── stats_utils.py              # Cálculo de estadísticas
+│   └── sar_filter.py               # Filtro SAR con optimización por tiles
+└── reporte/
+    ├── render_report.py            # Renderización de reportes
+    └── report_template.html      or request
+- Cobertura Sentinel-1: Revisión cada 6-12 días
+- DEM Copernicus: Resolución 30m (suficiente para urbano)
 
 ## Estructura del Proyecto
 
