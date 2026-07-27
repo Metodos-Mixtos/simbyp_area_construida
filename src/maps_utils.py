@@ -6,7 +6,7 @@ import ee
 import pandas as pd
 import requests
 from pathlib import Path
-from src.config import GOOGLE_CLOUD_PROJECT
+from src.config import GOOGLE_CLOUD_PROJECT, CLOUD_THRESHOLD
 
 def _ensure_ee_initialized():
     """
@@ -103,7 +103,7 @@ def get_tiles_from_ee(
                 ee.ImageCollection(col_id)
                 .filterDate(start_ee, end_ee)
                 .filterBounds(geom)
-                .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
+                .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", CLOUD_THRESHOLD))
                 .select(sel)
             )
 
@@ -171,8 +171,7 @@ def export_sentinel_as_png(
     output_dir: str,
     intersections_dir: str = None,
     lookback_days: int = 365,
-    n_tiles: int = 6,
-    use_sar_filtered: bool = False
+    n_tiles: int = 6
 ):
     """
     Exporta imágenes Sentinel-2 como mosaico de PNGs a 10m/píxel.
@@ -203,27 +202,28 @@ def export_sentinel_as_png(
     # Filtrar tiles que contienen expansión urbana
     if intersections_dir:
         expansion_geoms = []
-        # Buscar archivos de intersecciones (pueden tener año/mes en el nombre)
+        # Buscar archivo principal de construcciones nuevas (new_urban.geojson)
         import glob
         
-        # Priorizar archivos SAR filtrados si use_sar_filtered=True
-        if use_sar_filtered:
-            sar_paths = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections_sar_filtered.geojson"))
-            if sar_paths:
-                normal_path = sar_paths[0]
-                print(f"📊 Usando polígonos SAR filtrados para optimización de tiles: {os.path.basename(normal_path)}")
-            else:
-                # Fallback a archivos originales si no hay SAR
-                normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
-                normal_path = normal_path[0] if normal_path else os.path.join(intersections_dir, "new_urban_intersections.geojson")
-                print(f"⚠️ No se encontraron archivos SAR filtrados, usando originales")
-        else:
-            normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
-            normal_path = normal_path[0] if normal_path else os.path.join(intersections_dir, "new_urban_intersections.geojson")
+        # El archivo new_urban.geojson está en el directorio new_constructions/, no en intersections/
+        # intersections_dir = outputs/2025_04/intersections
+        # Necesitamos buscar en outputs/2025_04/new_constructions/new_urban.geojson
+        output_root = os.path.dirname(intersections_dir)  # outputs/2025_04
+        new_constructions_dir = os.path.join(output_root, "new_constructions")
+        new_urban_path = os.path.join(new_constructions_dir, "new_urban.geojson")
         
-        if os.path.exists(normal_path):
-            gdf_normal = gpd.read_file(normal_path).to_crs(epsg=4326)
+        if os.path.exists(new_urban_path):
+            print(f">> Usando {os.path.basename(new_urban_path)} para filtrar tiles...")
+            gdf_normal = gpd.read_file(new_urban_path).to_crs(epsg=4326)
             expansion_geoms.append(gdf_normal.unary_union)
+        else:
+            # Fallback: buscar archivos de intersecciones
+            normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
+            normal_path = normal_path[0] if normal_path else None
+            
+            if normal_path and os.path.exists(normal_path):
+                gdf_normal = gpd.read_file(normal_path).to_crs(epsg=4326)
+                expansion_geoms.append(gdf_normal.unary_union)
         
         if expansion_geoms:
             # Combinar todas las geometrías de expansión
@@ -281,7 +281,7 @@ def export_sentinel_as_png(
             ee.ImageCollection(col_id)
             .filterDate(start_ee, end_ee)
             .filterBounds(geom)
-            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
+            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", CLOUD_THRESHOLD))
             .select(sel)
         )
 
@@ -331,7 +331,7 @@ def export_sentinel_as_png(
         "bounds": [[miny, minx], [maxy, maxx]]  # bounds completos del AOI
     }
 
-def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path=None, tiles_before=None, tiles_current=None, png_images=None, use_sar_filtered=False):
+def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path=None, tiles_before=None, tiles_current=None, png_images=None, construcciones_path=None):
     
     """Generar mapa interactivo de expansión urbana con folium."""
 
@@ -381,7 +381,7 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
         t1_group.add_to(m)
         
         # === PERIODO T2 (mes actual) - Añadir todos los tiles ===
-        t2_group = folium.FeatureGroup(name=f"Sentinel-2 {month_str} {year}", show=False)
+        t2_group = folium.FeatureGroup(name=f"Sentinel-2 {month_str} {year}", show=True)
         
         for tile in png_images["t2_tiles"]:
             # Usar ruta ABSOLUTA
@@ -393,8 +393,6 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
                 cross_origin=False,
                 zindex=1
             ).add_to(t2_group)
-        
-        t2_group.add_to(m)
         
         t2_group.add_to(m)
         
@@ -416,33 +414,124 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
         show=False
     ).add_to(m)
 
-    # Capas de expansión urbana
-    # Buscar archivos de intersecciones (pueden tener año/mes en el nombre)
-    import glob
+    # === Capa de expansión urbana (construcciones nuevas detectadas) ===
+    if construcciones_path and os.path.exists(construcciones_path):
+        gdf_construcciones = sanitize_gdf(gpd.read_file(construcciones_path).to_crs(epsg=4326))
+        folium.GeoJson(
+            json.loads(gdf_construcciones.to_json()), 
+            name="Expansión del área construida",
+            style_function=lambda x: {
+                "color": "#FF6B00",      # Naranja
+                "weight": 1.5,
+                "fillColor": "#FF6B00",  # Naranja
+                "fillOpacity": 0.4       # Semitransparente
+            },
+            show=True  # Visible por defecto
+        ).add_to(m)
     
-    # Priorizar archivos SAR filtrados si use_sar_filtered=True
-    if use_sar_filtered:
-        sar_paths = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections_sar_filtered.geojson"))
-        normal_path = sar_paths[0] if sar_paths else None
-        if not normal_path:
-            # Fallback a archivos originales
-            normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
-            normal_path = normal_path[0] if normal_path else os.path.join(intersections_dir, "new_urban_intersections.geojson")
-    else:
-        normal_path = glob.glob(os.path.join(intersections_dir, "new_urban_*_intersections.geojson"))
-        normal_path = normal_path[0] if normal_path else os.path.join(intersections_dir, "new_urban_intersections.geojson")
-    if os.path.exists(normal_path):
-        gdf_norm = sanitize_gdf(gpd.read_file(normal_path).to_crs(epsg=4326))
-        folium.GeoJson(json.loads(gdf_norm.to_json()), name="Expansión del área construida",
-                       style_function=lambda x: {"color": "orange", "weight": 1.5, "fillOpacity": 0.05}).add_to(m)
+    # === Capa de construcciones existentes (catastro) ===
+    # Usar GPKG disuelto para visualización rápida y completa
+    from src.config import CONSTRUCCIONES_GPKG_DISSOLVE
+    
+    if os.path.exists(CONSTRUCCIONES_GPKG_DISSOLVE):
+        print(f"\n📊 Cargando construcciones existentes (disueltas)...")
+        print(f"   Archivo: {CONSTRUCCIONES_GPKG_DISSOLVE}")
         
-    # Capas base (SAC, Reserva, EEP)
-    folium.GeoJson(json.loads(gdf_sac.to_json()), name="Conflictos Socioambientales",
-                   style_function=lambda x: {"color": "#E31A1C", "weight": 1}, show=False).add_to(m)
-    folium.GeoJson(json.loads(gdf_res.to_json()), name="Cerros Orientales",
-                   style_function=lambda x: {"color": "#073013", "weight": 1}, show=False).add_to(m)
-    folium.GeoJson(json.loads(gdf_eep.to_json()), name="Estructura Ecológica Principal",
-                   style_function=lambda x: {"color": "#388900", "weight": 1}, show=False).add_to(m)
+        try:
+            gdf_const_dissolve = gpd.read_file(CONSTRUCCIONES_GPKG_DISSOLVE)
+            
+            # Reproyectar si es necesario
+            if gdf_const_dissolve.crs != 'EPSG:4326':
+                gdf_const_dissolve = gdf_const_dissolve.to_crs('EPSG:4326')
+            
+            # Filtrar al área del mapa (bbox del AOI)
+            if hasattr(gdf_aoi, 'total_bounds'):
+                bounds = gdf_aoi.total_bounds
+                gdf_const_dissolve = gdf_const_dissolve.cx[bounds[0]:bounds[2], bounds[1]:bounds[3]]
+            
+            gdf_const_dissolve = sanitize_gdf(gdf_const_dissolve)
+            print(f"   Geometrías: {len(gdf_const_dissolve)}")
+            
+            folium.GeoJson(
+                json.loads(gdf_const_dissolve.to_json()),
+                name="Construcciones existentes (Catastro)",
+                style_function=lambda x: {
+                    "color": "#999999",      # Gris medio borde
+                    "weight": 1,
+                    "fillColor": "#DDDDDD",  # Gris claro relleno
+                    "fillOpacity": 0.3       # Semitransparente
+                },
+                show=False  # Oculto por defecto
+            ).add_to(m)
+            print(f"   ✅ Capa de construcciones añadida al mapa")
+            
+        except Exception as e:
+            print(f"   ⚠️ Error cargando GPKG disuelto: {e}")
+    else:
+        print(f"\n⚠️ No se encontró GPKG disuelto: {CONSTRUCCIONES_GPKG_DISSOLVE}")
+        
+        # Fallback: buscar archivo generado por el pipeline
+        output_root = os.path.dirname(intersections_dir) if intersections_dir else None
+        if output_root:
+            construcciones_path = os.path.join(output_root, "new_constructions", "construcciones_existentes.geojson")
+            if os.path.exists(construcciones_path):
+                print(f"   Usando archivo del pipeline como fallback...")
+                gdf_const = sanitize_gdf(gpd.read_file(construcciones_path).to_crs(epsg=4326))
+                n_total = len(gdf_const)
+                
+                # Muestreo si hay demasiados
+                if n_total > 50000:
+                    gdf_const = gdf_const.sample(n=50000, random_state=42)
+                    print(f"   Muestra: 50,000 de {n_total:,}")
+                
+                folium.GeoJson(
+                    json.loads(gdf_const.to_json()),
+                    name="Construcciones existentes (Catastro)",
+                    style_function=lambda x: {
+                        "color": "#CCCCCC",
+                        "weight": 0.5,
+                        "fillColor": "#DDDDDD",
+                        "fillOpacity": 0.2
+                    },
+                    show=False
+                ).add_to(m)
+        
+    # === Capas ambientales y de protección ===
+    folium.GeoJson(
+        json.loads(gdf_sac.to_json()), 
+        name="Conflictos Socioambientales",
+        style_function=lambda x: {
+            "color": "#E31A1C",    # Rojo
+            "weight": 1,
+            "fillColor": "#E31A1C",
+            "fillOpacity": 0.2
+        }, 
+        show=False
+    ).add_to(m)
+    
+    folium.GeoJson(
+        json.loads(gdf_res.to_json()), 
+        name="Cerros Orientales",
+        style_function=lambda x: {
+            "color": "#073013",    # Verde oscuro
+            "weight": 1,
+            "fillColor": "#073013",
+            "fillOpacity": 0.3
+        }, 
+        show=False
+    ).add_to(m)
+    
+    folium.GeoJson(
+        json.loads(gdf_eep.to_json()), 
+        name="Estructura Ecológica Principal",
+        style_function=lambda x: {
+            "color": "#388900",    # Verde
+            "weight": 1,
+            "fillColor": "#388900",
+            "fillOpacity": 0.2
+        }, 
+        show=False
+    ).add_to(m)
 
     # Control de capas
     folium.LayerControl(collapsed=False).add_to(m)
@@ -471,7 +560,7 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
     
-def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, year, mes, sac, reserva, eep, use_sar_filtered=False):
+def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, year, mes, sac, reserva, eep, construcciones_path=None):
     """Genera mosaicos Sentinel y mapa interactivo usando PNG estáticos (optimizado)"""
     # Exportar imágenes Sentinel como PNG (solo tiles con expansión urbana)
     png_images = export_sentinel_as_png(
@@ -479,9 +568,8 @@ def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_
         end_t1=bounds_prev.strftime("%Y-%m-%d"),
         end_t2=bounds_curr.strftime("%Y-%m-%d"),
         output_dir=dirs["maps"],
-        intersections_dir=dirs["intersections"],  # Pasar directorio para filtrar tiles
-        lookback_days=365,
-        use_sar_filtered=use_sar_filtered  # Usar archivos SAR filtrados si existen
+        intersections_dir=dirs["intersections"],
+        lookback_days=365
     )
 
     map_html = os.path.join(dirs["maps"], f"map_expansion_{year}_{mes:02d}.html")
@@ -496,6 +584,6 @@ def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_
         previous_month_str=previous_month_str,
         year=year,
         png_images=png_images,
-        use_sar_filtered=use_sar_filtered  # Pasar parámetro para mostrar polígonos SAR
+        construcciones_path=construcciones_path
     )
     return map_html
