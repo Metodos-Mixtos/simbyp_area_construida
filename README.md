@@ -1,16 +1,54 @@
 # Urban Sprawl - SIMBYP Área Construida
 
-Análisis de expansión urbana para Bogotá utilizando Google Earth Engine - Dynamic World.
+Análisis de expansión urbana para Bogotá utilizando Sentinel-1 SAR + NDVI para detección de construcciones nuevas.
 
 ## Descripción
 
-Este proyecto analiza la expansión urbana mensual en el área de Bogotá mediante el procesamiento de imágenes satelitales de Dynamic World. Genera reportes con mapas interactivos, estadísticas y análisis de intersecciones con áreas protegidas (SAC, Reserva de Cerros Orientales y Estructura Ecológica Principal).
+Este proyecto analiza la expansión urbana mensual en el área de Bogotá mediante el procesamiento de imágenes satelitales de **Sentinel-1 SAR (radar)** con validación por **NDVI**. Genera reportes con mapas interactivos, estadísticas y análisis de intersecciones con áreas protegidas (SAC, Reserva de Cerros Orientales y Estructura Ecológica Principal).
+
+## Metodología de Detección
+
+### Pipeline de Detección de Construcciones Nuevas
+
+1. **Descarga de Construcciones Existentes**
+   - Fuente: Servicio REST de Catastro Bogotá
+   - Incluye buffer de 3 metros para excluir bordes
+   - Reparación automática de geometrías inválidas
+
+2. **Análisis Temporal Sentinel-1 VV**
+   - Sensor: Sentinel-1 IW GRD
+   - Polarización: VV (vertical-vertical)
+   - Corrección: GAMMA0_TERRAIN con DEM COPERNICUS_30
+   - Resolución: 10 metros
+   - Períodos: Mes anterior vs Mes actual (30 días cada uno)
+
+3. **Procesamiento SAR**
+   - Filtro Lee 5×5 para reducción de speckle
+   - Conversión a escala dB (decibeles)
+   - Cálculo de diferencia temporal
+   - Extracción de polígonos con cambio significativo (P99)
+
+4. **Validación por NDVI**
+   - Fuente: Sentinel-2 MSI
+   - Umbral: NDVI < 0.1 (excluye vegetación)
+   - Procesamiento: Google Earth Engine
+
+5. **Resultado Final**
+   - Polígonos de construcciones nuevas con alta confianza
+   - Criterios: Sin construcciones previas + Aumento VV > P99 + Sin vegetación
+
+### Ventajas de esta Metodología
+
+- ✅ **Excluye construcciones existentes** desde el inicio (más eficiente)
+- ✅ **Validación por NDVI** elimina falsos positivos de vegetación
+- ✅ **Filtro Lee** reduce ruido inherente de SAR
+- ✅ **Análisis temporal** detecta cambios reales (robusto)
+- ✅ **Sin clasificación directa** (más confiable que umbrales VV/VH)
 
 ## Características
 
-- Procesamiento automatizado de imágenes satelitales Dynamic World
-- **NUEVO: Filtro SAR de Sentinel-1 para validación de expansión urbana**
-- Análisis de expansión urbana mensual
+- Procesamiento automatizado mensual
+- Análisis de expansión urbana basado en SAR
 - Generación de mapas interactivos con Sentinel-2
 - Cálculo de estadísticas de área construida
 - Análisis de intersecciones con áreas protegidas
@@ -22,6 +60,7 @@ Este proyecto analiza la expansión urbana mensual en el área de Bogotá median
 - Cuenta de Google Cloud Platform con Google Earth Engine habilitado
 - Credenciales de servicio de Google Cloud
 - Acceso a Google Cloud Storage
+- Credenciales de Copernicus Dataspace (Sentinel Hub)
 
 ## Instalación
 
@@ -37,17 +76,17 @@ pip install -r requirement.txt
 ```
 
 3. Configurar variables de entorno:
-   - Creación `.env` con información de paths
+   - Crear archivo `.env` con información de paths
    - Completar las credenciales de Google Cloud
    - Ajustar las rutas de GCS según sea necesario
-
+   - Configurar credenciales de Sentinel Hub en GCP Secret Manager
 
 ## Uso
 
 Ejecutar el análisis para un mes específico:
 
 ```bash
-python main.py --anio 2025 --mes 12
+python main.py --anio 2026 --mes 6
 ```
 
 ### Parámetros
@@ -58,96 +97,201 @@ python main.py --anio 2025 --mes 12
 ### Ejemplo
 
 ```bash
-# Analizar diciembre 2025
-python main.py --anio 2025 --mes 12
+# Analizar junio 2026
+python main.py --anio 2026 --mes 6
 ```
 
-## Filtro SAR (Sentinel-1)
+## Configuración
 
-### ¿Qué es y por qué usarlo?
-
-El filtro SAR es una capa adicional de validación que utiliza datos de **Sentinel-1 SAR (Synthetic Aperture Radar)** para reducir falsos positivos en la detección de expansión urbana de Dynamic World.
-
-**Ventajas:**
-- Reduce falsos positivos causados por nubes, sombras o cambios temporales
-- Detecta estructuras físicas reales (SAR penetra nubes)
-- Valida construcciones usando retrodispersión VV/VH
-- Se aplica solo en áreas detectadas por DW (ahorra unidades de procesamiento)
-
-### Configuración
-
-#### 1. Obtener credenciales de Copernicus Dataspace
+### 1. Obtener credenciales de Copernicus Dataspace
 
 1. Crear cuenta en [Copernicus Dataspace](https://dataspace.copernicus.eu/)
 2. Ir a **Dashboard → User Settings → OAuth clients**
 3. Crear nuevo OAuth client
 4. Copiar `CLIENT_ID` y `CLIENT_SECRET`
 
-#### 2. Configurar variables de entorno
-
-Añadir al archivo `.env`:
+### 2. Almacenar credenciales en GCP Secret Manager
 
 ```bash
-# Credenciales Sentinel Hub (Copernicus Dataspace)
-SENTINELHUB_CLIENT_ID=tu-client-id-aqui
-SENTINELHUB_CLIENT_SECRET=tu-client-secret-aqui
+# Crear secretos
+gcloud secrets create sentinelhub-client-id --data-file=- <<EOF
+tu-client-id-aqui
+EOF
+
+gcloud secrets create sentinelhub-client-secret --data-file=- <<EOF
+tu-client-secret-aqui
+EOF
+
+# Dar permisos al service account
+gcloud secrets add-iam-policy-binding sentinelhub-client-id \
+  --member="serviceAccount:tu-service-account@proyecto.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+gcloud secrets add-iam-policy-binding sentinelhub-client-secret \
+  --member="serviceAccount:tu-service-account@proyecto.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
 ```
 
-#### 3. Habilitar/deshabilitar filtro SAR
+### 3. Configurar parámetros
 
 En `src/config.py`:
 
 ```python
-# Habilitar filtro SAR
-USE_SAR_FILTER = True  # True = aplica filtro, False = solo DW
+# Buffer para construcciones existentes
+BUFFER_CONSTRUCCIONES_METROS = 3  # 3 metros
 
-# Configuración temporal
-SAR_LOOKBACK_T1_DAYS = 90   # t1: trimestral (verificar ausencia de construcciones)
-SAR_LOOKBACK_T2_DAYS = 30   # t2: mensual (verificar construcción actual)
+# Resolución espacial
+SENTINEL1_RESOLUTION = 10  # 10 metros
+
+# Período temporal
+SENTINEL1_LOOKBACK_DAYS = 30  # 30 días
+
+# Umbral NDVI
+NDVI_THRESHOLD = 0.1  # < 0.1 = sin vegetación
 ```
 
-**Nota temporal:** Delta de 90 días entre el FIN de t1 y el INICIO de t2 para capturar construcciones progresivas.
-
-### Parámetros SAR
-
-Los parámetros de clasificación urbana SAR se configuran en `src/config.py`:
-
-```python
-SAR_PARAMS = {
-    # Umbrales de clasificación (valores en dB)
-    'vv_threshold': -12,        # VV > -12 dB indica superficies rugosas/urbanas
-    'vh_threshold': -18,        # VH > -18 dB complementa detección
-    
-    # Ratio VV/VH
-    'use_ratio': True,          # Usar ratio para mejorar precisión
-    'vv_vh_ratio_min': 1.0,     # Ratio mínimo característico de áreas urbanas
-    'vv_vh_ratio_max': 9.5,     # Ratio máximo
-    
-    # Filtros morfológicos
-    'erosion_size': 3,          # Elimina píxeles aislados
-    'dilation_size': 2,         # Rellena huecos pequeños
-    
-    # Área mínima
-    'min_cluster_pixels': 5,    # 500 m² mínimo (5 píxeles a 10m)
-    'min_cluster_area_ha': 0.05
-}
-```
-
-### Flujo de procesamiento con SAR
+## Flujo de Procesamiento
 
 ```
-1. Dynamic World → Detecta expansión inicial (mediana temporal)
+1. Descarga construcciones existentes (Catastro REST API)
                 ↓
-2. Intersecciones → Cruza con áreas protegidas
+2. Aplica buffer de 3m
                 ↓
-3. Filtro SAR → Validación con Sentinel-1 (optimizado por tiles)
-   ├─ Divide AOI en grid 12x12 (144 tiles para Bogotá)
-   ├─ Procesa solo tiles con expansión DW
-   ├─ Descarga SAR t1 y t2 (composición mediana)
-   ├─ Clasifica áreas urbanas (VV, VH, ratio)
-   ├─ Detecta expansión (t2 AND NOT t1)
-   ├─ Vectoriza y combina tiles
-   └─ Intersección geométrica DW ∩ SAR
+3. Crea máscara de construcciones
+                ↓
+4. Descarga Sentinel-1 VV (mes anterior y actual)
+                ↓
+5. Aplica filtro Lee
+                ↓
+6. Calcula diferencia temporal
+                ↓
+7. Extrae polígonos P99
+                ↓
+8. Filtra por NDVI < 0.1 (Google Earth Engine)
+                ↓
+9. Genera new_urban.geojson
+                ↓
+10. Calcula intersecciones con áreas protegidas
+                ↓
+11. Genera estadísticas
+                ↓
+12. Crea mapas interactivos
+                ↓
+13. Genera reporte HTML
+                ↓
+14. Sube resultados a GCS
+```
+
+## Estructura de Salida
+
+```
+temp_data/urban_sprawl/outputs/YYYY_MM/
+├── new_constructions/
+│   ├── new_urban.geojson           # Construcciones nuevas detectadas
+│   └── construcciones_existentes.geojson
+├── intersections/
+│   ├── new_urban_YYYY_MM_intersections.geojson
+│   └── new_urban_YYYY_MM_no_intersections.geojson
+├── stats/
+│   └── resumen_expansion_upl_ha_YYYY_MM.csv
+├── maps/
+│   ├── map_expansion_YYYY_MM.html
+│   └── sentinel_tiles/
+├── reportes/
+│   └── reporte_expansion_MM_YYYY.html
+└── sentinel/
+    └── (mosaicos Sentinel-2)
+```
+
+## Datos Técnicos
+
+### Sentinel-1
+- **Sensor**: C-band SAR
+- **Modo**: Interferometric Wide (IW)
+- **Producto**: GRD (Ground Range Detected)
+- **Corrección**: GAMMA0_TERRAIN (Radiometric Terrain Correction)
+- **DEM**: Copernicus 30m
+- **Resolución espacial**: 10m × 10m
+- **Polarización**: VV (vertical-vertical)
+- **Órbita**: Descendente
+- **Tiempo de revisita**: 12 días (con Sentinel-1A y 1B)
+
+### Sentinel-2
+- **Sensor**: MSI (Multispectral Instrument)
+- **Bandas usadas**: 
+  - B8 (NIR): 842 nm
+  - B4 (Red): 665 nm
+- **Resolución espacial**: 10m
+- **NDVI**: (B8 - B4) / (B8 + B4)
+
+### Procesamiento
+- **Filtro Lee**: Ventana 5×5 píxeles
+- **Percentil**: P99 (1% superior de cambios)
+- **Buffer construcciones**: 3 metros
+- **Umbral NDVI**: 0.1 (sin vegetación significativa)
+
+## API y Servicios
+
+- **Sentinel Hub API**: Acceso a Sentinel-1 corregido por terreno
+- **Google Earth Engine**: Cálculo de NDVI con Sentinel-2
+- **Catastro Bogotá REST API**: Descarga de construcciones existentes
+- **Google Cloud Storage**: Almacenamiento de resultados
+
+## Interpretación de Resultados
+
+### Valores NDVI de Referencia (Bogotá, 2600 msnm)
+- `< 0.0`: Agua, sombras profundas
+- `0.0 - 0.1`: Suelo desnudo, concreto, asfalto ✅
+- `0.1 - 0.3`: Urbano denso, vegetación dispersa
+- `0.3 - 0.5`: Pastizales, vegetación moderada
+- `0.5 - 0.7`: Bosque seco, eucaliptos
+- `> 0.7`: Bosque denso andino
+
+### Criterios de Detección Final
+Un polígono se clasifica como **construcción nueva** si cumple:
+1. ✅ No existía construcción previa (+ 3m buffer)
+2. ✅ Aumento significativo de backscatter VV (> P99)
+3. ✅ NDVI < 0.1 (sin vegetación)
+
+## Solución de Problemas
+
+### Error: "Credenciales de Sentinel Hub no configuradas"
+- Verifica que los secretos existan en GCP Secret Manager
+- Confirma permisos del service account
+- Revisa variable `GOOGLE_CLOUD_PROJECT` en `.env`
+
+### Error: "No se detectaron construcciones nuevas"
+- Normal si no hubo expansión urbana ese mes
+- Revisa que el AOI sea correcto
+- Verifica disponibilidad de imágenes Sentinel-1
+
+### Falsos positivos (vegetación detectada como construcción)
+- Ajustar `NDVI_THRESHOLD` en `config.py` (aumentar a 0.2 o 0.3)
+- Revisar período de imágenes Sentinel-2 (puede tener nubes)
+
+## Contribuciones
+
+Para contribuir al proyecto:
+1. Fork del repositorio
+2. Crear rama para tu feature (`git checkout -b feature/AmazingFeature`)
+3. Commit de cambios (`git commit -m 'Add AmazingFeature'`)
+4. Push a la rama (`git push origin feature/AmazingFeature`)
+5. Abrir Pull Request
+
+## Licencia
+
+[Especificar licencia]
+
+## Contacto
+
+[Información de contacto]
+
+## Referencias
+
+- [Copernicus Dataspace](https://dataspace.copernicus.eu/)
+- [Sentinel Hub Documentation](https://docs.sentinel-hub.com/)
+- [Google Earth Engine](https://earthengine.google.com/)
+- [Catastro Bogotá](https://www.catastrobogota.gov.co/)
                 ↓
 4. Estadísticas → Calcula áreas validadas
                 ↓

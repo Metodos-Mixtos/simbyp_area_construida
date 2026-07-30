@@ -26,7 +26,7 @@ from src.aux_utils import export_image, make_relative_path
 from src.config import (
     GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX, URB_PROB,
     BUFFER_CONSTRUCCIONES_METROS, SENTINEL1_RESOLUTION,
-    NDVI_THRESHOLD, CLOUD_THRESHOLD,
+    NDVI_THRESHOLD, CLOUD_THRESHOLD, MIN_AREA_M2, DETECTION_PERCENTILE,
     CONSTRUCCIONES_GPKG_LOCAL, CONSTRUCCIONES_GPKG_DISSOLVE
 )
 from reporte.render_report import render
@@ -54,13 +54,14 @@ def prepare_folders(base_path, anio, mes):
     return dirs
 
 
-def download_catastro_construcciones(aoi_geometry, output_path=None, local_gpkg_path=None):
+def download_catastro_construcciones(aoi_geometry, output_path=None, local_gpkg_path=None, apply_buffer_m=0):
     """Descarga construcciones existentes desde servicio REST de Catastro Bogota o usa GPKG local.
     
     Args:
         aoi_geometry: ee.Geometry o GeoDataFrame con el área de interés
         output_path: Ruta donde guardar el resultado
         local_gpkg_path: Ruta opcional a GPKG local (si existe, se usa en vez del REST API)
+        apply_buffer_m: Buffer en METROS a aplicar (0 = sin buffer). Se aplica en CRS proyectado.
     """
     
     # Convertir AOI a GeoDataFrame
@@ -82,28 +83,23 @@ def download_catastro_construcciones(aoi_geometry, output_path=None, local_gpkg_
             
             # Asegurar que está en el CRS correcto
             if gdf.crs is None:
-                print("   Asignando CRS EPSG:4686...")
-                gdf.set_crs(epsg=4686, inplace=True)
+                print("   Asignando CRS EPSG:3116...")
+                gdf.set_crs(epsg=3116, inplace=True)
             
-            # IMPORTANTE: Convertir a EPSG:4326 ANTES de filtrar
-            # (igual que en el notebook)
-            if gdf.crs.to_epsg() != 4326:
-                print(f"   Convirtiendo desde {gdf.crs.to_epsg()} a EPSG:4326...")
-                gdf = gdf.to_crs(epsg=4326)
+            # Convertir a EPSG:3116 si no lo está (CRS proyectado en METROS - Bogotá zone)
+            if gdf.crs.to_epsg() != 3116:
+                print(f"   Convirtiendo a EPSG:3116 (metros)...")
+                gdf = gdf.to_crs(epsg=3116)
             
-            # Filtrar por AOI usando mismo método del notebook (gdf.cx)
-            # IMPORTANTE: Ambos GeoDataFrames deben estar en el MISMO CRS (4326)
+            # Filtrar por AOI - convertir AOI a 3116 también
             print(f"\nFiltrando construcciones al AOI...")
+            aoi_gdf_3116 = aoi_gdf.to_crs('EPSG:3116') if aoi_gdf.crs != 'EPSG:3116' else aoi_gdf
+            aoi_bounds_3116 = aoi_gdf_3116.total_bounds
             
-            # Asegurar que AOI esté en EPSG:4326 (mismo que construcciones)
-            aoi_gdf_4326 = aoi_gdf.to_crs('EPSG:4326') if aoi_gdf.crs != 'EPSG:4326' else aoi_gdf
-            aoi_bounds_4326 = aoi_gdf_4326.total_bounds
-            
-            # Filtrar usando spatial indexing con bounds en 4326
-            # gdf YA está en EPSG:4326 (línea 88)
+            # Filtrar usando spatial indexing con bounds en 3116
             gdf_filtered = gdf.cx[
-                aoi_bounds_4326[0]:aoi_bounds_4326[2],
-                aoi_bounds_4326[1]:aoi_bounds_4326[3]
+                aoi_bounds_3116[0]:aoi_bounds_3116[2],
+                aoi_bounds_3116[1]:aoi_bounds_3116[3]
             ]
             
             print(f"   Construcciones en AOI: {len(gdf_filtered):,}")
@@ -115,7 +111,14 @@ def download_catastro_construcciones(aoi_geometry, output_path=None, local_gpkg_
                 invalid_mask = ~gdf_filtered.geometry.is_valid
                 gdf_filtered.loc[invalid_mask, 'geometry'] = gdf_filtered.loc[invalid_mask, 'geometry'].buffer(0)
             
-            # gdf_filtered ya está en EPSG:4326 (no hace falta convertir)
+            # Aplicar buffer EN METROS (mientras estamos en EPSG:3116)
+            if apply_buffer_m > 0:
+                print(f"   Aplicando buffer de {apply_buffer_m}m (CRS proyectado EPSG:3116)...")
+                gdf_filtered['geometry'] = gdf_filtered.geometry.buffer(apply_buffer_m)
+            
+            # AHORA convertir a EPSG:4326 para el resto del procesamiento
+            print(f"   Convirtiendo a EPSG:4326 para procesamiento...")
+            gdf_filtered = gdf_filtered.to_crs(epsg=4326)
             
             if output_path:
                 Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -135,16 +138,16 @@ def download_catastro_construcciones(aoi_geometry, output_path=None, local_gpkg_
     
     url_rest = "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/catastro/construccion/MapServer/0/query"
     
-    if aoi_gdf.crs != 'EPSG:4686':
-        aoi_gdf_4686 = aoi_gdf.to_crs('EPSG:4686')
+    if aoi_gdf.crs != 'EPSG:3116':
+        aoi_gdf_3116 = aoi_gdf.to_crs('EPSG:3116')
     else:
-        aoi_gdf_4686 = aoi_gdf
+        aoi_gdf_3116 = aoi_gdf
     
     params = {
         "where": "1=1",
         "outFields": "*",
         "f": "geojson",
-        "outSR": "4686"
+        "outSR": "3116"
     }
     
     try:
@@ -157,14 +160,14 @@ def download_catastro_construcciones(aoi_geometry, output_path=None, local_gpkg_
     
     if "features" not in datos_json or len(datos_json["features"]) == 0:
         print("No se encontraron construcciones")
-        return gpd.GeoDataFrame(geometry=[], crs='EPSG:4686')
+        return gpd.GeoDataFrame(geometry=[], crs='EPSG:3116')
     
     gdf = gpd.GeoDataFrame.from_features(datos_json["features"])
-    gdf.set_crs(epsg=4686, inplace=True)
+    gdf.set_crs(epsg=3116, inplace=True)
     print(f"   Descargadas {len(gdf):,} construcciones totales")
     
     print(f"\nFiltrando construcciones al AOI...")
-    gdf_filtered = gpd.sjoin(gdf, aoi_gdf_4686, how='inner', predicate='intersects')
+    gdf_filtered = gpd.sjoin(gdf, aoi_gdf_3116, how='inner', predicate='intersects')
     
     if 'index_right' in gdf_filtered.columns:
         gdf_filtered = gdf_filtered.drop(columns=['index_right'])
@@ -176,6 +179,11 @@ def download_catastro_construcciones(aoi_geometry, output_path=None, local_gpkg_
         print(f"   Reparando {invalid_count:,} geometrias invalidas...")
         invalid_mask = ~gdf_filtered.geometry.is_valid
         gdf_filtered.loc[invalid_mask, 'geometry'] = gdf_filtered.loc[invalid_mask, 'geometry'].buffer(0)
+    
+    # Aplicar buffer EN METROS (mientras estamos en EPSG:3116)
+    if apply_buffer_m > 0:
+        print(f"   Aplicando buffer de {apply_buffer_m}m (CRS proyectado EPSG:3116)...")
+        gdf_filtered['geometry'] = gdf_filtered.geometry.buffer(apply_buffer_m)
     
     gdf_filtered = gdf_filtered.to_crs('EPSG:4326')
     
@@ -331,8 +339,14 @@ def download_sentinel1_vv(bbox, bbox_size, time_interval, sh_config, aoi_mask=No
             continue
     
     print(f"\n   ✅ Todos los tiles procesados")
-    print(f"      Píxeles válidos totales: {np.sum(mask_full):,}")
+    pixeles_validos = np.sum(mask_full)
+    pixeles_totales = mask_full.size
+    print(f"      Píxeles válidos: {pixeles_validos:,} / {pixeles_totales:,} ({(pixeles_validos/pixeles_totales)*100:.1f}%)")
     print(f"      Rango VV: [{np.nanmin(vv_full):.2f}, {np.nanmax(vv_full):.2f}] dB")
+    
+    if aoi_mask is not None:
+        pixeles_enmascarados = pixeles_totales - pixeles_validos
+        print(f"      ✅ Máscara aplicada: {pixeles_enmascarados:,} píxeles excluidos (construcciones)")
     
     return vv_full, mask_full
 
@@ -416,17 +430,17 @@ def _download_sentinel1_single_tile(bbox, bbox_size, time_interval, sh_config, a
 
 
 def extract_p99_polygons(vv_difference, mask_combined, bbox, bbox_size, resolution=10):
-    """Extrae poligonos donde la diferencia temporal supera P99."""
+    """Extrae poligonos donde la diferencia temporal supera el percentil configurado."""
     diferencias_validas = vv_difference[~np.isnan(vv_difference)]
-    p99_threshold = np.percentile(diferencias_validas, 99)
+    p99_threshold = np.percentile(diferencias_validas, DETECTION_PERCENTILE)
     
-    print(f"\nPercentil 99: {p99_threshold:.3f} dB")
+    print(f"\nPercentil {DETECTION_PERCENTILE}: {p99_threshold:.3f} dB")
     
     mask_p99 = np.zeros_like(vv_difference, dtype=np.uint8)
     mask_p99[mask_combined & (vv_difference > p99_threshold)] = 1
     
     n_pixels_p99 = np.sum(mask_p99)
-    print(f"   Pixeles P99: {n_pixels_p99:,} ({(n_pixels_p99 * resolution**2) / 10000:.2f} ha)")
+    print(f"   Pixeles P{DETECTION_PERCENTILE}: {n_pixels_p99:,} ({(n_pixels_p99 * resolution**2) / 10000:.2f} ha)")
     
     bbox_coords = bbox.geometry.bounds
     transform = from_bounds(
@@ -443,15 +457,32 @@ def extract_p99_polygons(vv_difference, mask_combined, bbox, bbox_size, resoluti
     )
     
     polygons = [shape(geom) for geom, value in shapes_gen if value == 1]
-    print(f"   Poligonos: {len(polygons)}")
+    print(f"   Poligonos brutos: {len(polygons)}")
     
     if len(polygons) == 0:
         return None, p99_threshold
     
     gdf_p99 = gpd.GeoDataFrame({'geometry': polygons}, crs='EPSG:4326')
-    gdf_p99['area_ha'] = gdf_p99.geometry.area * 111320 * 111320 / 10000
-    gdf_p99['threshold'] = p99_threshold
     
+    # Calcular área correctamente: proyectar a EPSG:3116 (metros)
+    gdf_p99_metros = gdf_p99.to_crs(epsg=3116)
+    gdf_p99['area_m2'] = gdf_p99_metros.geometry.area
+    gdf_p99['area_ha'] = gdf_p99['area_m2'] / 10000
+    
+    # Filtrar polígonos muy pequeños (ruido, píxeles sueltos)
+    n_before = len(gdf_p99)
+    gdf_p99 = gdf_p99[gdf_p99['area_m2'] >= MIN_AREA_M2].copy()
+    n_removed = n_before - len(gdf_p99)
+    
+    if n_removed > 0:
+        print(f"   Filtrados {n_removed} polígonos < {MIN_AREA_M2} m² (ruido)")
+    
+    if len(gdf_p99) == 0:
+        print(f"   Todos los polígonos eran ruido")
+        return None, p99_threshold
+    
+    gdf_p99['threshold'] = p99_threshold
+    print(f"   Poligonos válidos: {len(gdf_p99)}")
     print(f"   Area total: {gdf_p99['area_ha'].sum():.2f} ha")
     
     return gdf_p99, p99_threshold
@@ -1079,35 +1110,22 @@ def process_new_constructions(geometry, output_dir, year, month, sh_config):
     
     construcciones_path = output_dir / "construcciones_existentes.geojson"
     
-    # MÉTODO DE DETECCIÓN: Construcciones individuales vs disueltas
-    # 
-    # OPCIÓN 1: GPKG DISUELTO - Rápido pero conservador
-    #   - Usa 1 polígono único (2.4M construcciones fusionadas)
-    #   - Buffer 3m solo al perímetro exterior
-    #   - Excluye TODO el interior + 3m borde
-    #   - Ventaja: 1000x más rápido
-    #   - Desventaja: NO detecta construcciones en huecos/patios internos
-    #
-    # OPCIÓN 2 (REPLICAR NOTEBOOK): CONSTRUCCIONES INDIVIDUALES - Lento pero preciso
-    #   - Usa 2.4M construcciones individuales
-    #   - Buffer 3m a CADA construcción
-    #   - Conserva huecos entre construcciones para análisis
-    #   - Ventaja: Detecta más construcciones nuevas (ej: en calles angostas)
-    #   - Desventaja: 100-1000x más lento
-    #
-    # CONFIGURACIÓN: Polígono disuelto para producción
+    # MÉTODO DE DETECCIÓN: Polígono disuelto con buffer optimizado
     # - 1 polígono fusionado (2.4M construcciones)
+    # - Buffer de 3m aplicado durante carga en CRS proyectado (EPSG:3116 Bogotá)
     # - 1000x más rápido que construcciones individuales
     # - Más conservador: NO detecta construcciones en espacios internos
     
     local_gpkg = CONSTRUCCIONES_GPKG_DISSOLVE  # Rápido (producción) - 1000x más veloz
     
     print(f"   ⚡ Usando polígono DISUELTO (rápido): {Path(local_gpkg).name}")
+    print(f"   Buffer {BUFFER_CONSTRUCCIONES_METROS}m aplicado durante carga (optimizado)")
     
     gdf_construcciones = download_catastro_construcciones(
         geometry, 
         construcciones_path,
-        local_gpkg_path=local_gpkg if os.path.exists(local_gpkg) else None
+        local_gpkg_path=local_gpkg if os.path.exists(local_gpkg) else None,
+        apply_buffer_m=BUFFER_CONSTRUCCIONES_METROS  # Buffer aplicado durante carga
     )
     
     if len(gdf_construcciones) == 0:
@@ -1133,24 +1151,18 @@ def process_new_constructions(geometry, output_dir, year, month, sh_config):
     print(f"\nCreando mascaras...")
     aoi_mask = create_polygon_mask(aoi_gdf, aoi_bbox, bbox_size)
     
-    # ⚠️ NOTA: Buffer aplicado en grados (método del notebook original)
-    # Esto es geográficamente impreciso pero necesario para replicar resultados
-    buffer_grados = BUFFER_CONSTRUCCIONES_METROS / 111320
-    print(f"   Buffer: {BUFFER_CONSTRUCCIONES_METROS}m ≈ {buffer_grados:.8f} grados")
-    
-    # EXPLICACIÓN: Polígono disuelto + buffer 3m
-    # - El polígono disuelto YA contiene TODO el interior construido (2.4M construcciones fusionadas)
-    # - Al aplicar buffer(+3m), expandimos hacia AFUERA del perímetro
-    # - Resultado: Excluye TODO el interior + 3m de borde (equivalente al notebook, 1000x más rápido)
-    gdf_construcciones_buffered = gdf_construcciones.copy()
-    gdf_construcciones_buffered['geometry'] = gdf_construcciones.geometry.buffer(buffer_grados)
-    
-    construcciones_mask = create_polygon_mask(gdf_construcciones_buffered, aoi_bbox, bbox_size)
+    # gdf_construcciones YA TIENE el buffer de 3m aplicado (durante carga en EPSG:3116)
+    construcciones_mask = create_polygon_mask(gdf_construcciones, aoi_bbox, bbox_size)
     analisis_mask = aoi_mask & (~construcciones_mask.astype(bool)).astype(np.uint8)
     
     print(f"   AOI: {np.sum(aoi_mask):,} px")
     print(f"   Construcciones (+{BUFFER_CONSTRUCCIONES_METROS}m): {np.sum(construcciones_mask):,} px")
     print(f"   Analizable: {np.sum(analisis_mask):,} px ({(np.sum(analisis_mask)*SENTINEL1_RESOLUTION**2)/1e6:.2f} km2)")
+    
+    # VERIFICACIÓN: La máscara excluye construcciones correctamente
+    cobertura_construcciones = (np.sum(construcciones_mask) / np.sum(aoi_mask)) * 100
+    print(f"   Cobertura construcciones: {cobertura_construcciones:.1f}% del AOI")
+    print(f"   ✅ Máscara de construcciones se aplicará a datos Sentinel-1")
     
     # Calcular períodos de análisis (mes completo actual vs mes completo anterior)
     # Mes actual: del 1 al último día del mes
@@ -1211,6 +1223,33 @@ def process_new_constructions(geometry, output_dir, year, month, sh_config):
     if len(gdf_final) == 0:
         print("Todos eliminados por NDVI")
         return None
+    
+    # PASO CRÍTICO: Eliminar polígonos que intersectan construcciones existentes
+    # Estrategia conservadora: eliminar COMPLETAMENTE cualquier polígono con intersección
+    # (en lugar de crear huecos con difference)
+    print(f"\nEliminando polígonos que intersectan construcciones existentes...")
+    print(f"   Polígonos antes de limpieza: {len(gdf_final)}")
+    print(f"   Área antes: {gdf_final['area_ha'].sum():.2f} ha")
+    
+    # Unir todas las construcciones en un solo polígono para verificación rápida
+    construcciones_union = gdf_construcciones.union_all()
+    
+    # Identificar polígonos que NO intersectan construcciones
+    mask_no_intersecta = ~gdf_final.intersects(construcciones_union)
+    gdf_final_clean = gdf_final[mask_no_intersecta].copy()
+    
+    n_eliminados = len(gdf_final) - len(gdf_final_clean)
+    
+    print(f"   Polígonos después de limpieza: {len(gdf_final_clean)}")
+    print(f"   Polígonos eliminados por intersección: {n_eliminados}")
+    print(f"   Área después: {gdf_final_clean['area_ha'].sum():.2f} ha")
+    print(f"   Área eliminada: {gdf_final['area_ha'].sum() - gdf_final_clean['area_ha'].sum():.2f} ha")
+    
+    if len(gdf_final_clean) == 0:
+        print("   Todos los polígonos intersectaban construcciones existentes")
+        return None
+    
+    gdf_final = gdf_final_clean
     
     output_path = output_dir / "new_urban.geojson"
     gdf_final.to_file(output_path, driver='GeoJSON')

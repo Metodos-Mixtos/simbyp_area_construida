@@ -24,19 +24,11 @@ if credentials_path:
         print(f"  Por favor verifica la ruta en tu archivo .env")
         sys.exit(1)
 
-from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH, GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX, USE_SAR_FILTER, SAR_PARAMS, SAR_LOOKBACK_T1_DAYS, SAR_LOOKBACK_T2_DAYS, SENTINELHUB_CLIENT_ID, SENTINELHUB_CLIENT_SECRET
+from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEADER_IMG1_PATH, HEADER_IMG2_PATH, FOOTER_IMG_PATH, GOOGLE_CLOUD_PROJECT, BASE_PATH, GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX, NDVI_THRESHOLD, SENTINELHUB_CLIENT_ID, SENTINELHUB_CLIENT_SECRET, BUFFER_CONSTRUCCIONES_METROS, SENTINEL1_RESOLUTION, SENTINEL1_LOOKBACK_DAYS
 from src.aux_utils import authenticate_gee, load_geometry, set_dates, cleanup_temp_data
 from src.stats_utils import calculate_expansion_areas, create_intersections
-from src.pipeline_utils import prepare_folders, process_dynamic_world, build_report 
+from src.pipeline_utils import prepare_folders, build_report, initialize_sentinel_hub_config, process_new_constructions
 from src.maps_utils import generate_maps
-
-# Importar módulo SAR (solo si está habilitado)
-if USE_SAR_FILTER:
-    from src.sar_filter import (
-        initialize_sentinel_hub_config,
-        filter_dw_polygons_with_sar,
-        apply_sar_filter_to_intersections
-    )
 
 # Suppress warnings
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL 1.1.1+")
@@ -76,92 +68,82 @@ def main(anio: int, mes: int):
 
     # === Autenticación y carga del AOI ===
     authenticate_gee(project=GOOGLE_CLOUD_PROJECT)
-    print(f"Debug: AOI_PATH = {AOI_PATH}")  # Added logging to check the path
+    print(f"Debug: AOI_PATH = {AOI_PATH}")
     geometry = load_geometry(AOI_PATH)
 
-    # === 1. Dynamic World ===
-    dw_path = process_dynamic_world(geometry, dirs["dw"], last_day_prev, last_day_curr, anio, mes)
-
-    # === 2. Intersecciones ===
-    create_intersections(dw_path, SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"], anio, mes)
+    # === 1. Detección de Construcciones Nuevas (Sentinel-1 VV + NDVI) ===
+    print("\n" + "="*70)
+    print("🛰️ INICIANDO DETECCIÓN DE CONSTRUCCIONES NUEVAS")
+    print("   Metodología: Sentinel-1 VV Temporal + NDVI")
+    print("="*70)
     
-    # === 3. Filtro SAR (NUEVO - opcional) ===
-    sar_filtered_applied = False
-    if USE_SAR_FILTER:
-        print("\n" + "="*70)
-        print("🛰️ FILTRO SAR HABILITADO")
-        print("="*70)
+    # Verificar credenciales Sentinel Hub
+    if not SENTINELHUB_CLIENT_ID or not SENTINELHUB_CLIENT_SECRET:
+        raise ValueError(
+            "Credenciales de Sentinel Hub no configuradas.\n"
+            "Asegúrate de que los secretos estén en GCP Secret Manager:\n"
+            "  - sentinelhub-client-id\n"
+            "  - sentinelhub-client-secret"
+        )
+    
+    # Inicializar Sentinel Hub
+    sh_config = initialize_sentinel_hub_config(
+        client_id=SENTINELHUB_CLIENT_ID,
+        client_secret=SENTINELHUB_CLIENT_SECRET
+    )
+    print(f"✅ Sentinel Hub configurado")
+    
+    # Ejecutar detección
+    try:
+        new_urban_path = process_new_constructions(
+            geometry=geometry,
+            output_dir=dirs["new_constructions"],
+            year=anio,
+            month=mes,
+            sh_config=sh_config
+        )
         
-        # Verificar credenciales
-        if not SENTINELHUB_CLIENT_ID or not SENTINELHUB_CLIENT_SECRET:
-            print("⚠️ ADVERTENCIA: Credenciales de Sentinel Hub no configuradas")
-            print("   Añade SENTINELHUB_CLIENT_ID y SENTINELHUB_CLIENT_SECRET a tu .env")
-            print("   Continuando sin filtro SAR...")
+        if new_urban_path and os.path.exists(new_urban_path):
+            print(f"\n✅ Construcciones nuevas detectadas: {new_urban_path}")
         else:
-            try:
-                # Inicializar Sentinel Hub con credenciales CDSE
-                sar_config = initialize_sentinel_hub_config(
-                    client_id=SENTINELHUB_CLIENT_ID,
-                    client_secret=SENTINELHUB_CLIENT_SECRET
-                )
-                
-                # Buscar archivo de intersecciones para filtrar
-                import glob
-                inter_files = glob.glob(os.path.join(dirs["intersections"], "new_urban_*_intersections.geojson"))
-                
-                if inter_files:
-                    dw_inter_path = inter_files[0]
-                    print(f"📂 Archivo DW a filtrar: {os.path.basename(dw_inter_path)}")
-                    
-                    # Aplicar filtro SAR con SentinelHub (gamma0-terrain RTC)
-                    sar_filtered_path = filter_dw_polygons_with_sar(
-                        dw_geojson_path=dw_inter_path,
-                        output_dir=dirs["intersections"],
-                        last_day_prev=last_day_prev,
-                        last_day_curr=last_day_curr,
-                        sar_params=SAR_PARAMS,
-                        config=sar_config,
-                        lookback_t1_days=SAR_LOOKBACK_T1_DAYS,
-                        lookback_t2_days=SAR_LOOKBACK_T2_DAYS
-                    )
-                    
-                    if sar_filtered_path and os.path.exists(sar_filtered_path):
-                        # Aplicar filtro a todos los archivos de intersecciones
-                        print("\n📊 Aplicando filtro SAR a archivos de intersecciones...")
-                        apply_sar_filter_to_intersections(
-                            intersections_dir=dirs["intersections"],
-                            sar_filtered_path=sar_filtered_path,
-                            anio=anio,
-                            mes=mes
-                        )
-                        sar_filtered_applied = True
-                        print("✅ Filtro SAR aplicado exitosamente")
-                    elif sar_filtered_path is None:
-                        print("⚠️ SAR falló al descargar datos - continuando sin filtro SAR")
-                    else:
-                        print("⚠️ No se generó archivo SAR filtrado")
-                else:
-                    print("⚠️ No se encontraron archivos de intersecciones DW")
-                    
-            except Exception as e:
-                print(f"\n❌ Error en filtro SAR: {e}")
-                print("⚠️ Continuando sin filtro SAR...")
-                import traceback
-                traceback.print_exc()
-    else:
-        print("\n⏭️ Filtro SAR deshabilitado (USE_SAR_FILTER=False)")
-    
-    # === 4. Estadísticas ===
-    # Usar archivos filtrados por SAR si están disponibles
-    if sar_filtered_applied:
-        print("\n📊 Calculando estadísticas con datos filtrados por SAR...")
-        # Las estadísticas usarán automáticamente los archivos _sar_filtered.geojson
-        # porque buscan por patrón de nombre
-    
-    calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH, anio, mes, use_sar_filtered=sar_filtered_applied)
+            print(f"\n⏭️ No se detectaron construcciones nuevas para {month_str} {anio}")
+            print(f"📄 Generando reporte sin expansión...")
+            from src.pipeline_utils import build_no_expansion_report
+            build_no_expansion_report(
+                header_img1_path=HEADER_IMG1_PATH,
+                header_img2_path=HEADER_IMG2_PATH,
+                footer_img_path=FOOTER_IMG_PATH,
+                output_dir=dirs["reportes"],
+                month=month_str,
+                year=anio,
+                mes_num=mes
+            )
+            # Limpiar y salir
+            cleanup_temp_data()
+            return
+            
+    except Exception as e:
+        print(f"\n❌ Error en detección de construcciones: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
-    # === 5. Mapas Sentinel ===
-    # Usar archivos SAR filtrados para descarga de tiles si están disponibles
+    # === 2. Intersecciones con Áreas Protegidas ===
+    print("\n" + "="*70)
+    print("📊 CALCULANDO INTERSECCIONES CON ÁREAS PROTEGIDAS")
+    print("="*70)
+    create_intersections(new_urban_path, SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"], anio, mes)
+    
+    # === 3. Estadísticas ===
+    print("\n" + "="*70)
+    print("📊 CALCULANDO ESTADÍSTICAS")
+    print("="*70)
+    calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH, anio, mes)
+
+    # === 4. Mapas Sentinel ===
+    print("\n" + "="*70)
+    print("🗺️ GENERANDO MAPAS")
+    print("="*70)
     try:
         map_html = generate_maps(
             aoi_path=AOI_PATH,
@@ -175,32 +157,29 @@ def main(anio: int, mes: int):
             sac=SAC_PATH,
             reserva=RESERVA_PATH,
             eep=EEP_PATH,
-            use_sar_filtered=sar_filtered_applied  # Usar archivos SAR si existen
+            construcciones_path=new_urban_path  # Pasar ruta de construcciones nuevas
         )
         print(f"✅ Mapa generado: {map_html}")
-        if map_html and os.path.exists(map_html):
-            print("Map file exists locally")
-        else:
-            print("Map file not found locally")
     except Exception as e:
         print(f"❌ Error generando mapa: {e}")
+        import traceback
+        traceback.print_exc()
         map_html = None
 
-    # === 6. Reporte ===
-    # Las imágenes se usan directamente desde GCS sin descargarlas
-    # Usar archivo SAR si está disponible
-    csv_suffix = "_sar" if sar_filtered_applied else ""
-    stats_csv = f"{dirs['stats']}/resumen_expansion_upl_ha_{anio}_{mes:02d}{csv_suffix}.csv"
+    # === 5. Reporte ===
+    print("\n" + "="*70)
+    print("📄 GENERANDO REPORTE")
+    print("="*70)
+    stats_csv = f"{dirs['stats']}/resumen_expansion_upl_ha_{anio}_{mes:02d}.csv"
     
     if os.path.exists(stats_csv):
-        # Verificar si el CSV tiene datos (SAR pudo rechazar todo)
+        # Verificar si el CSV tiene datos
         import pandas as pd
         try:
             df = pd.read_csv(stats_csv)
-            if len(df) == 0 or df['area_ha'].sum() == 0:
-                # CSV existe pero no hay datos (SAR rechazó todo)
-                print(f"⚠️ SAR rechazó toda la expansión detectada por DW en {month_str} {anio}")
-                print(f"📄 Generando reporte indicando validación SAR sin confirmaciones...")
+            if len(df) == 0 or df['total_ha'].sum() == 0:
+                print(f"⚠️ No se detectó expansión urbana para {month_str} {anio}")
+                print(f"📄 Generando reporte sin expansión...")
                 from src.pipeline_utils import build_no_expansion_report
                 build_no_expansion_report(
                     header_img1_path=HEADER_IMG1_PATH,
@@ -209,11 +188,7 @@ def main(anio: int, mes: int):
                     output_dir=dirs["reportes"],
                     month=month_str,
                     year=anio,
-                    mes_num=int(args.mes),
-                    custom_message={
-                        'title': 'SAR no confirmó la expansión detectada por Dynamic World.',
-                        'body': f'Durante el periodo de {month_str} {anio}, Dynamic World identificó cambios en coberturas que podrían indicar expansión urbana. Sin embargo, la validación con datos SAR de Sentinel-1 (radar) no confirmó construcciones físicas en esas áreas, por lo que fueron descartadas.'
-                    }
+                    mes_num=mes
                 )
             else:
                 # CSV tiene datos, generar reporte normal
@@ -226,7 +201,7 @@ def main(anio: int, mes: int):
                     output_dir=dirs["reportes"],
                     month=month_str,
                     year=anio,
-                    mes_num=int(args.mes)
+                    mes_num=mes
                 )
         except Exception as e:
             print(f"⚠️ Error leyendo CSV: {e}")
@@ -240,12 +215,11 @@ def main(anio: int, mes: int):
                 output_dir=dirs["reportes"],
                 month=month_str,
                 year=anio,
-                mes_num=int(args.mes)
+                mes_num=mes
             )
     else:
         print(f"⏭️ No se detectó expansión urbana para {month_str} {anio}")
         print(f"📄 Generando reporte sin expansión...")
-        # Crear reporte básico indicando que no hubo expansión
         from src.pipeline_utils import build_no_expansion_report
         build_no_expansion_report(
             header_img1_path=HEADER_IMG1_PATH,
@@ -254,21 +228,21 @@ def main(anio: int, mes: int):
             output_dir=dirs["reportes"],
             month=month_str,
             year=anio,
-            mes_num=int(args.mes)
+            mes_num=mes
         )
 
     # === Subir carpeta completa a GCS ===
     def upload_folder_to_gcs(local_folder, gcs_bucket, gcs_prefix):
-        # Archivos a excluir (imágenes de header/footer que ya están en GCS)
-        exclude_files = {'asi_4.png', 'bogota_4.png', 'secre_5.png'}
+        # Archivos legacy del sistema Dynamic World que no deben subirse
+        legacy_patterns = ['dw_and_sar', 'dw_only', 'sar_only', '_sar.csv']
         
         client = storage.Client()
         bucket = client.bucket(gcs_bucket)
         for root, dirs_files, files in os.walk(local_folder):
             for file in files:
-                # Saltar archivos excluidos
-                if file in exclude_files:
-                    print(f"⏭️ Omitiendo {file} (ya está en GCS)")
+                # Saltar archivos legacy de Dynamic World
+                if any(pattern in file for pattern in legacy_patterns):
+                    print(f"⏭️ Omitiendo {file} (archivo legacy)")
                     continue
                     
                 local_path = os.path.join(root, file)

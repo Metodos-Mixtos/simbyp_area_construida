@@ -8,39 +8,39 @@ from rasterio.features import shapes
 from pathlib import Path
 from src.aux_utils import download_gcs_to_temp, TEMP_DATA_DIR
 
-def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output_dir, anio, mes):
+def create_intersections(new_urban_path, sac_path, reserva_path, eep_path, output_dir, anio, mes):
     """
-    Convierte un raster binario de expansión urbana a polígonos,
-    genera intersecciones con SAC, Reserva y EEP,
-    y maneja el caso en que no haya geometrías válidas.
+    Genera intersecciones de polígonos de expansión urbana con SAC, Reserva y EEP.
+    Ahora trabaja directamente con GeoJSON en lugar de raster.
+    
+    Args:
+        new_urban_path: Ruta al archivo GeoJSON con polígonos de construcciones nuevas
+        sac_path: Ruta a SAC
+        reserva_path: Ruta a Reserva
+        eep_path: Ruta a EEP
+        output_dir: Directorio de salida
+        anio: Año del análisis
+        mes: Mes del análisis
     """
     base_name = f"new_urban_{anio}_{mes:02d}"
-
-    with rasterio.open(new_urban_tif) as src:
-        data = src.read(1)
-        mask = data > 0
-        results = list(shapes(data, mask=mask, transform=src.transform))
-
-    # Validar si hay geometrías
-    if not results:
-        print(f"⚠️ No se encontraron píxeles positivos en {base_name}. Se omite intersección.")
+    
+    # Leer GeoJSON directamente
+    if not os.path.exists(new_urban_path):
+        print(f"⚠️ Archivo {new_urban_path} no existe. Se omite intersección.")
         empty_path = os.path.join(output_dir, f"{base_name}_intersections.geojson")
-        gpd.GeoDataFrame(geometry=[], crs=src.crs).to_file(empty_path)
+        gpd.GeoDataFrame(geometry=[], crs='EPSG:4326').to_file(empty_path)
+        return
+    
+    gdf_newurban = gpd.read_file(new_urban_path)
+    
+    # Validar si hay geometrías
+    if len(gdf_newurban) == 0:
+        print(f"⚠️ No hay polígonos en {base_name}. Se omite intersección.")
+        empty_path = os.path.join(output_dir, f"{base_name}_intersections.geojson")
+        gpd.GeoDataFrame(geometry=[], crs=gdf_newurban.crs).to_file(empty_path)
         return
 
-    features = []
-    for geom, value in results:
-        if geom and geom.get("type") in ("Polygon", "MultiPolygon"):
-            features.append({"geometry": shape(geom), "value": value})
-
-    if not features:
-        print(f"⚠️ Ninguna geometría válida encontrada en {base_name}.")
-        gpd.GeoDataFrame(geometry=[], crs=src.crs).to_file(
-            os.path.join(output_dir, f"{base_name}_intersections.geojson")
-        )
-        return
-
-    gdf_newurban = gpd.GeoDataFrame(features, geometry="geometry", crs=src.crs)
+    print(f"✅ Polígonos de construcciones nuevas: {len(gdf_newurban):,}")
 
     sac_local = download_gcs_to_temp(sac_path)
     res_local = download_gcs_to_temp(reserva_path)
@@ -84,7 +84,7 @@ def create_intersections(new_urban_tif, sac_path, reserva_path, eep_path, output
     print(f"✅ Intersecciones generadas correctamente para {base_name}.")
 
 
-def calculate_expansion_areas(input_dir, output_dir, upl_path, anio, mes, use_sar_filtered=False):
+def calculate_expansion_areas(input_dir, output_dir, upl_path, anio, mes):
     """
     Calcula áreas de expansión por UPL
     
@@ -94,32 +94,14 @@ def calculate_expansion_areas(input_dir, output_dir, upl_path, anio, mes, use_sa
         upl_path: ruta a archivo UPL
         anio: año del análisis
         mes: mes del análisis
-        use_sar_filtered: bool, default=False
-            - True: Usa archivos filtrados por SAR (*_sar_filtered.geojson)
-            - False: Usa archivos originales de DW (sin filtro SAR)
-            
-            Flujo del pipeline:
-            1. DW siempre se ejecuta primero (genera archivos base)
-            2. SAR intenta filtrar resultados de DW (opcional)
-            3. Si SAR falla o no está habilitado → usa archivos DW originales (False)
-            4. Si SAR tiene éxito → usa archivos filtrados por SAR (True)
-            
-            El valor False por defecto es el fallback seguro. 
     """
     crs = "EPSG:9377"
     
-    # Determinar qué archivos usar
-    if use_sar_filtered:
-        path_no = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_no_intersections_sar_filtered.geojson")
-        path_inter = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_intersections_sar_filtered.geojson")
-        suffix = "_sar"
-        print("📊 Usando archivos filtrados por SAR para estadísticas")
-    else:
-        path_no = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_no_intersections.geojson")
-        path_inter = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_intersections.geojson")
-        suffix = ""
+    # Archivos de intersecciones
+    path_no = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_no_intersections.geojson")
+    path_inter = os.path.join(input_dir, f"new_urban_{anio}_{mes:02d}_intersections.geojson")
 
-    # Verificar si los archivos existen (pueden no existir si no hubo expansión)
+    # Verificar si los archivos existen
     if not os.path.exists(path_no) or not os.path.exists(path_inter):
         print(f"⏭️ Omitiendo cálculo: archivos de intersección no existen (sin expansión detectada)")
         return
@@ -161,7 +143,7 @@ def calculate_expansion_areas(input_dir, output_dir, upl_path, anio, mes, use_sa
     )
     resumen["total_ha"] = resumen["interseccion_ha"] + resumen["no_interseccion_ha"]
 
-    out_csv = os.path.join(output_dir, f"resumen_expansion_upl_ha_{anio}_{mes:02d}{suffix}.csv")
+    out_csv = os.path.join(output_dir, f"resumen_expansion_upl_ha_{anio}_{mes:02d}.csv")
     resumen.to_csv(out_csv, index=False)
     print(f"✅ Guardado: {out_csv}")
     return resumen, None

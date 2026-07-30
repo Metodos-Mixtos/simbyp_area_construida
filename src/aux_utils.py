@@ -174,8 +174,7 @@ def export_image(image, geometry, output_path):
         filename=output_path,
         region=geometry.bounds(),
         scale=10,
-        crs="EPSG:4326",
-        num_threads=1  # Reducir concurrencia para evitar Restricted Mode
+        crs="EPSG:4326"
     )
     
 def make_relative_path(path, base_dir):
