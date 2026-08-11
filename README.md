@@ -186,21 +186,22 @@ NDVI_THRESHOLD = 0.1  # < 0.1 = sin vegetación
 
 ```
 temp_data/urban_sprawl/outputs/YYYY_MM/
-├── new_constructions/
+├── dw/
 │   ├── new_urban.geojson           # Construcciones nuevas detectadas
 │   └── construcciones_existentes.geojson
 ├── intersections/
-│   ├── new_urban_YYYY_MM_intersections.geojson
-│   └── new_urban_YYYY_MM_no_intersections.geojson
+│   ├── new_urban_intersections.geojson      # Con restricciones
+│   └── new_urban_no_intersections.geojson   # Sin restricciones
 ├── stats/
-│   └── resumen_expansion_upl_ha_YYYY_MM.csv
+│   └── resumen_expansion_upl_ha.csv
 ├── maps/
-│   ├── map_expansion_YYYY_MM.html
-│   └── sentinel_tiles/
+│   ├── map_expansion.html
+│   ├── sentinel_YYYY-MM-DD_t1/    # Mosaico periodo anterior
+│   └── sentinel_YYYY-MM-DD_t2/    # Mosaico periodo actual
 ├── reportes/
-│   └── reporte_expansion_MM_YYYY.html
+│   └── urban_sprawl_reporte_YYYY_MM.html
 └── sentinel/
-    └── (mosaicos Sentinel-2)
+    └── (datos temporales Sentinel-2)
 ```
 
 ## Datos Técnicos
@@ -319,49 +320,45 @@ outputs/YYYY_MM/
     └── resumen_expansion_upl_ha_YYYY_MM_sar.csv             # SAR validado
 ```
 
-### Desactivar filtro SAR
+### Configurar parámetros de detección
 
-Si no deseas usar el filtro SAR (por ejemplo, durante pruebas o si no tienes credenciales):
+En `src/config.py` puedes ajustar los parámetros de detección:
 
-1. En `src/config.py`, cambiar:
-   ```python
-   USE_SAR_FILTER = False
-   ```
+```python
+# Percentil de detección para cambios temporales
+DETECTION_PERCENTILE = 99  # 99 = 1% superior (más inclusivo)
 
-2. El pipeline funcionará normalmente solo con Dynamic World
+# Umbral NDVI para excluir vegetación
+NDVI_THRESHOLD = 0.1  # < 0.1 = sin vegetación
+
+# Área mínima para polígonos detectados
+MIN_AREA_M2 = 200  # Elimina polígonos < 200 m²
+```
 
 ### Limitaciones y Recomendaciones
 
-**Processing Units (PU):**
-- Cuota gratuita: 10,000 PU/mes + 300 PU/minuto
-- Si excedes límites: Crear nueva cuenta o aumentar lookback delay
-Herramientas Adicionales
+**Sentinel Hub API:**
+- Cuota gratuita: Variable según plan de Copernicus Dataspace
+- Límite de descarga: ~50 MB por petición (manejado con tiles automáticos)
 
-### Exportar visualización SAR de tile individual
+**Google Earth Engine:**
+- Cuota gratuita: Generosa para uso no comercial
+- Ventana temporal NDVI: Se amplía automáticamente 3 meses hacia atrás si no hay imágenes
 
-Para inspección visual y debug, puedes exportar datos SAR de un tile específico:
-
-```bash
-# Ver tiles con expansión DW
-python export_sar_visualization.py --date 2025-04-30 --list-tiles
-
-# Exportar tile específico (GeoTIFF para QGIS)
-python export_sar_visualization.py --date 2025-04-30 --lookback 30 --tile "11,8" --no-png
-```
-
-**Outputs:**
-- `sar_visualization_YYYYMMDD.tif`: GeoTIFF con 4 bandas (VV, VH, Mask, Urban)
+**Recomendaciones:**
+- Ejecutar análisis mensualmente para mantener continuidad temporal
+- Verificar disponibilidad de imágenes Sentinel-1 en la región
+- Revisar manualmente detecciones en áreas de sombras o terreno complejo
 - `sar_visualization_YYYYMMDD.p     # Script principal
 ├── export_sar_visualization.py     # Exportar SAR de tiles individuales (debug)
 ├── requirement.txt                 # Dependencias del proyecto
 ├── .env                            # Variables de entorno
 ├── src/
-│   ├── config.py                   # Configuración y parámetros SAR/DW
+│   ├── config.py                   # Configuración y parámetros del pipeline
 │   ├── aux_utils.py                # Utilidades auxiliares
 │   ├── maps_utils.py               # Generación de mapas (Sentinel-2 RGB)
-│   ├── pipeline_utils.py           # Pipeline Dynamic World
-│   ├── stats_utils.py              # Cálculo de estadísticas
-│   └── sar_filter.py               # Filtro SAR con optimización por tiles
+│   ├── pipeline_utils.py           # Pipeline Sentinel-1 VV + NDVI
+│   └── stats_utils.py              # Cálculo de estadísticas
 └── reporte/
     ├── render_report.py            # Renderización de reportes
     └── report_template.html      or request
@@ -379,9 +376,8 @@ simbyp_area_construida/
 │   ├── config.py             # Configuración y variables de entorno
 │   ├── aux_utils.py          # Utilidades auxiliares
 │   ├── maps_utils.py         # Generación de mapas
-│   ├── pipeline_utils.py     # Pipeline de procesamiento
-│   ├── stats_utils.py        # Cálculo de estadísticas
-│   └── sar_filter.py         # Filtro SAR de Sentinel-1
+│   ├── pipeline_utils.py     # Pipeline Sentinel-1 VV + NDVI
+│   └── stats_utils.py        # Cálculo de estadísticas
 └── reporte/
     ├── render_report.py      # Renderización de reportes
     └── report_template.html  # Plantilla HTML del reporte
@@ -391,11 +387,12 @@ simbyp_area_construida/
 
 El script genera las siguientes salidas en `BASE_PATH/urban_sprawl/outputs/YYYY_MM/`:
 
-- **dw/**: Imágenes procesadas de Dynamic World
-- **intersections/**: GeoJSON de intersecciones con áreas protegidas (incluye versiones filtradas por SAR si está habilitado)
-- **stats/**: Estadísticas en formato JSON y CSV (incluye versiones SAR si está habilitado)
-- **maps/**: Mapas interactivos en HTML
-- **reportes/**: Reportes finales en HTML
+- **dw/**: Polígonos de construcciones nuevas detectadas (GeoJSON)
+- **intersections/**: GeoJSON de intersecciones con áreas protegidas (SAC, Reserva, EEP)
+- **stats/**: Estadísticas por UPL en formato CSV
+- **maps/**: Mapas interactivos en HTML con capas Sentinel-2
+- **reportes/**: Reportes finales en HTML con metodología y análisis
+- **sentinel/**: Mosaicos Sentinel-2 RGB descargados
 
 ## Seguridad
 

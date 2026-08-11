@@ -432,13 +432,25 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     # === Capa de construcciones existentes (catastro) ===
     # Usar GPKG disuelto para visualización rápida y completa
     from src.config import CONSTRUCCIONES_GPKG_DISSOLVE
+    from src.aux_utils import download_gcs_to_temp
     
-    if os.path.exists(CONSTRUCCIONES_GPKG_DISSOLVE):
+    # Descargar desde GCS si es necesario
+    construcciones_path = CONSTRUCCIONES_GPKG_DISSOLVE
+    if str(CONSTRUCCIONES_GPKG_DISSOLVE).startswith("gs://"):
+        print(f"\n📥 Descargando construcciones desde GCS...")
+        try:
+            construcciones_path = download_gcs_to_temp(CONSTRUCCIONES_GPKG_DISSOLVE)
+            print(f"   Descargado a: {construcciones_path}")
+        except Exception as e:
+            print(f"   ⚠️ Error descargando desde GCS: {e}")
+            construcciones_path = None
+    
+    if construcciones_path and os.path.exists(construcciones_path):
         print(f"\n📊 Cargando construcciones existentes (disueltas)...")
-        print(f"   Archivo: {CONSTRUCCIONES_GPKG_DISSOLVE}")
+        print(f"   Archivo: {Path(construcciones_path).name}")
         
         try:
-            gdf_const_dissolve = gpd.read_file(CONSTRUCCIONES_GPKG_DISSOLVE)
+            gdf_const_dissolve = gpd.read_file(construcciones_path)
             
             # Reproyectar si es necesario
             if gdf_const_dissolve.crs != 'EPSG:4326':

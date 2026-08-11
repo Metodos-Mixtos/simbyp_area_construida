@@ -27,7 +27,7 @@ from src.config import (
     GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX, URB_PROB,
     BUFFER_CONSTRUCCIONES_METROS, SENTINEL1_RESOLUTION,
     NDVI_THRESHOLD, CLOUD_THRESHOLD, MIN_AREA_M2, DETECTION_PERCENTILE,
-    CONSTRUCCIONES_GPKG_LOCAL, CONSTRUCCIONES_GPKG_DISSOLVE
+    CONSTRUCCIONES_GPKG_DISSOLVE, MALLA_VIAL_GPKG, AEROPUERTO_GPKG
 )
 from reporte.render_report import render
 
@@ -55,12 +55,12 @@ def prepare_folders(base_path, anio, mes):
 
 
 def download_catastro_construcciones(aoi_geometry, output_path=None, local_gpkg_path=None, apply_buffer_m=0):
-    """Descarga construcciones existentes desde servicio REST de Catastro Bogota o usa GPKG local.
+    """Descarga construcciones existentes desde servicio REST de Catastro Bogota o usa GPKG local/GCS.
     
     Args:
         aoi_geometry: ee.Geometry o GeoDataFrame con el área de interés
         output_path: Ruta donde guardar el resultado
-        local_gpkg_path: Ruta opcional a GPKG local (si existe, se usa en vez del REST API)
+        local_gpkg_path: Ruta opcional a GPKG local o GCS (gs://...) - si existe, se usa en vez del REST API
         apply_buffer_m: Buffer en METROS a aplicar (0 = sin buffer). Se aplica en CRS proyectado.
     """
     
@@ -74,11 +74,23 @@ def download_catastro_construcciones(aoi_geometry, output_path=None, local_gpkg_
     else:
         raise ValueError("aoi_geometry debe ser ee.Geometry o GeoDataFrame")
     
-    # Intentar usar GPKG local primero
-    if local_gpkg_path and os.path.exists(local_gpkg_path):
-        print(f"\n🏗️  Usando polígono DISUELTO (construcciones fusionadas): {Path(local_gpkg_path).name}")
+    # Manejar ruta GCS (descargar a temporal)
+    gpkg_to_read = local_gpkg_path
+    if local_gpkg_path and str(local_gpkg_path).startswith("gs://"):
+        from src.aux_utils import download_gcs_to_temp
+        print(f"\n[GCS] Descargando desde GCS: {local_gpkg_path}")
         try:
-            gdf = gpd.read_file(local_gpkg_path)
+            gpkg_to_read = download_gcs_to_temp(local_gpkg_path)
+            print(f"   Descargado a: {gpkg_to_read}")
+        except Exception as e:
+            print(f"   ⚠️ Error descargando desde GCS: {e}")
+            gpkg_to_read = None
+    
+    # Intentar usar GPKG local/descargado primero
+    if gpkg_to_read and os.path.exists(gpkg_to_read):
+        print(f"\n[GPKG] Usando polígono DISUELTO (construcciones fusionadas): {Path(gpkg_to_read).name}")
+        try:
+            gdf = gpd.read_file(gpkg_to_read)
             print(f"   Cargadas {len(gdf):,} construcciones totales")
             
             # Asegurar que está en el CRS correcto
@@ -134,7 +146,7 @@ def download_catastro_construcciones(aoi_geometry, output_path=None, local_gpkg_
             print(f"   Intentando con REST API de Catastro...")
     
     # Fallback: descargar desde REST API
-    print("\n\ud83c\udfed  Descargando construcciones desde Catastro Bogota...")
+    print("\n[API] Descargando construcciones desde Catastro Bogota...")
     
     url_rest = "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/catastro/construccion/MapServer/0/query"
     
@@ -503,7 +515,7 @@ def filter_polygons_by_ndvi(gdf, fecha_inicio, fecha_fin, ndvi_threshold=0.1, ti
     Returns:
         GeoDataFrame filtrado (solo polígonos con NDVI < threshold)
     """
-    print(f"\n📊 Filtrando por NDVI < {ndvi_threshold}...")
+    print(f"\n[NDVI] Filtrando por NDVI < {ndvi_threshold}...")
     print(f"   Periodo: {fecha_inicio} a {fecha_fin}")
     print(f"   Total polígonos P99: {len(gdf):,}")
     
@@ -558,10 +570,18 @@ def _filter_ndvi_simple(gdf, fecha_inicio, fecha_fin, ndvi_threshold):
     
     print(f"\n   Cargando colección Sentinel-2...")
     
+    # OPTIMIZACIÓN: Ampliar ventana temporal hacia atrás (3 meses) para mayor probabilidad de imágenes sin nubes
+    from datetime import datetime, timedelta
+    fecha_fin_dt = datetime.strptime(fecha_fin, '%Y-%m-%d')
+    fecha_inicio_ampliada = fecha_fin_dt - timedelta(days=90)  # 3 meses atrás
+    periodo_ndvi_start = fecha_inicio_ampliada.strftime('%Y-%m-%d')
+    
+    print(f"   Ventana temporal ampliada: {periodo_ndvi_start} a {fecha_fin} (3 meses)")
+    
     # Filtrar imágenes por cobertura de nubes
     s2_collection = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
         .filterBounds(roi) \
-        .filterDate(fecha_inicio, fecha_fin) \
+        .filterDate(periodo_ndvi_start, fecha_fin) \
         .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', CLOUD_THRESHOLD))
     
     try:
@@ -615,10 +635,16 @@ def _filter_ndvi_by_tiles_spatial(gdf, fecha_inicio, fecha_fin, ndvi_threshold, 
         # Crear ROI del tile
         tile_roi = ee.Geometry.Rectangle([bounds[0], bounds[1], bounds[2], bounds[3]])
         
+        # OPTIMIZACIÓN: Ampliar ventana temporal hacia atrás (3 meses)
+        from datetime import datetime, timedelta
+        fecha_fin_dt = datetime.strptime(fecha_fin, '%Y-%m-%d')
+        fecha_inicio_ampliada = fecha_fin_dt - timedelta(days=90)  # 3 meses atrás
+        periodo_ndvi_start = fecha_inicio_ampliada.strftime('%Y-%m-%d')
+        
         # Filtrar imágenes por cobertura de nubes
         s2_collection = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
             .filterBounds(tile_roi) \
-            .filterDate(fecha_inicio, fecha_fin) \
+            .filterDate(periodo_ndvi_start, fecha_fin) \
             .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', CLOUD_THRESHOLD))
         
         try:
@@ -1124,13 +1150,33 @@ def process_new_constructions(geometry, output_dir, year, month, sh_config):
     gdf_construcciones = download_catastro_construcciones(
         geometry, 
         construcciones_path,
-        local_gpkg_path=local_gpkg if os.path.exists(local_gpkg) else None,
+        local_gpkg_path=local_gpkg,  # Pasar siempre la ruta (GCS o local)
         apply_buffer_m=BUFFER_CONSTRUCCIONES_METROS  # Buffer aplicado durante carga
     )
     
     if len(gdf_construcciones) == 0:
         print("No hay construcciones en el AOI")
         return None
+    
+    # Cargar malla vial para exclusión
+    print(f"\n[GPKG] Cargando malla vial...")
+    gdf_malla_vial = download_catastro_construcciones(
+        geometry,
+        construcciones_path.replace('construcciones', 'malla_vial'),
+        local_gpkg_path=MALLA_VIAL_GPKG,
+        apply_buffer_m=0  # Sin buffer para malla vial
+    )
+    print(f"   Polígonos malla vial: {len(gdf_malla_vial):,}")
+    
+    # Cargar aeropuerto para exclusión
+    print(f"\n[GPKG] Cargando aeropuerto...")
+    gdf_aeropuerto = download_catastro_construcciones(
+        geometry,
+        construcciones_path.replace('construcciones', 'aeropuerto'),
+        local_gpkg_path=AEROPUERTO_GPKG,
+        apply_buffer_m=0  # Sin buffer para aeropuerto
+    )
+    print(f"   Polígonos aeropuerto: {len(gdf_aeropuerto):,}")
     
     if isinstance(geometry, ee.Geometry):
         aoi_geojson = geometry.getInfo()
@@ -1151,18 +1197,27 @@ def process_new_constructions(geometry, output_dir, year, month, sh_config):
     print(f"\nCreando mascaras...")
     aoi_mask = create_polygon_mask(aoi_gdf, aoi_bbox, bbox_size)
     
+    # Crear máscaras individuales
     # gdf_construcciones YA TIENE el buffer de 3m aplicado (durante carga en EPSG:3116)
     construcciones_mask = create_polygon_mask(gdf_construcciones, aoi_bbox, bbox_size)
-    analisis_mask = aoi_mask & (~construcciones_mask.astype(bool)).astype(np.uint8)
+    malla_vial_mask = create_polygon_mask(gdf_malla_vial, aoi_bbox, bbox_size)
+    aeropuerto_mask = create_polygon_mask(gdf_aeropuerto, aoi_bbox, bbox_size)
+    
+    # Combinar las 3 máscaras (OR lógico - unión)
+    exclusion_mask = construcciones_mask | malla_vial_mask | aeropuerto_mask
+    analisis_mask = aoi_mask & (~exclusion_mask.astype(bool)).astype(np.uint8)
     
     print(f"   AOI: {np.sum(aoi_mask):,} px")
     print(f"   Construcciones (+{BUFFER_CONSTRUCCIONES_METROS}m): {np.sum(construcciones_mask):,} px")
+    print(f"   Malla vial: {np.sum(malla_vial_mask):,} px")
+    print(f"   Aeropuerto: {np.sum(aeropuerto_mask):,} px")
+    print(f"   Exclusión total (unión 3 capas): {np.sum(exclusion_mask):,} px")
     print(f"   Analizable: {np.sum(analisis_mask):,} px ({(np.sum(analisis_mask)*SENTINEL1_RESOLUTION**2)/1e6:.2f} km2)")
     
-    # VERIFICACIÓN: La máscara excluye construcciones correctamente
-    cobertura_construcciones = (np.sum(construcciones_mask) / np.sum(aoi_mask)) * 100
-    print(f"   Cobertura construcciones: {cobertura_construcciones:.1f}% del AOI")
-    print(f"   ✅ Máscara de construcciones se aplicará a datos Sentinel-1")
+    # VERIFICACIÓN: La máscara excluye todas las áreas correctamente
+    cobertura_exclusion = (np.sum(exclusion_mask) / np.sum(aoi_mask)) * 100
+    print(f"   Cobertura exclusión: {cobertura_exclusion:.1f}% del AOI")
+    print(f"   ✅ Máscara combinada (construcciones + vías + aeropuerto) se aplicará a datos Sentinel-1")
     
     # Calcular períodos de análisis (mes completo actual vs mes completo anterior)
     # Mes actual: del 1 al último día del mes
@@ -1361,8 +1416,90 @@ def build_report(df_path, map_html, header_img1_path, header_img2_path, footer_i
 
 
 def build_no_expansion_report(header_img1_path, header_img2_path, footer_img_path, output_dir, month, year, mes_num, custom_message=None):
-    """Genera reporte cuando no hay expansion."""
-    html_path = os.path.join(output_dir, f"urban_sprawl_reporte_{year}_{month}.html")
+    """Genera reporte cuando no hay expansion, manteniendo el formato visual consistente."""
+    from pathlib import Path
+    from urllib.parse import quote
+    
+    def get_image_url(gcs_path):
+        """Convierte ruta GCS a URL pública."""
+        if gcs_path and gcs_path.startswith('gs://'):
+            gcs_path_clean = gcs_path.replace('gs://', '')
+            parts = gcs_path_clean.split('/')
+            encoded_parts = [quote(part, safe='') for part in parts]
+            return f"https://storage.googleapis.com/{'/'.join(encoded_parts)}"
+        elif gcs_path and os.path.exists(gcs_path):
+            return Path(gcs_path).name
+        return ""
+    
+    header1_url = get_image_url(header_img1_path)
+    header2_url = get_image_url(header_img2_path)
+    footer_url = get_image_url(footer_img_path)
+    
+    mensaje = custom_message or "Para este periodo no se detectaron nuevas construcciones bajo esta metodología."
+    
+    html_content = f"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Reporte de Expansión Urbana - {month} {year}</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ margin:0; padding:0; background:white; color:#1a1a1a; font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; }}
+    header.banner {{ background:#e3351f; width:100%; margin:0; padding:1.5rem 0; display:flex; justify-content:space-between; align-items:center; box-sizing:border-box; }}
+    header.banner img {{ height:70px; margin:0 2rem; }}
+    footer.banner {{ background:#e3351f; width:100%; margin:0; padding:1.5rem 0; text-align:center; display:block; box-sizing:border-box; position:relative; left:0; right:0; }}
+    footer.banner img {{ height:70px; }}
+    .wrap {{max-width: 1000px; margin: 0 auto; padding: 2rem; padding-bottom:0;}}
+    h1 {{font-size: 22pt; font-weight: bold; text-align: center;}}
+    .note {{font-size: 11pt; color: #555; text-align: center;}}
+    h2 {{color: #8F0000; margin-top: 2rem;}}
+    .card {{ background:#fafafa; border:1px solid #ddd; border-radius:6px; padding:1rem; margin-bottom:1rem; }}
+    .card p {{ text-align: justify; }}
+    .card--alert {{ background:#FFD4D4; border:2px solid #8F0000; border-radius:6px; padding:2rem; margin:2rem 0; text-align:center; }}
+    .card--alert p {{ font-size: 14px; font-weight: 400; color: #1a1a1a; margin:0; }}
+    section {{ margin-bottom:3rem; }}
+  </style>
+</head>
+<body>
+  <header class="banner">
+    <img src="{header1_url}" alt="Aquí sí pasa Bogotá">
+    <img src="{header2_url}" alt="Bogotá">
+  </header>
+  <div class="wrap">
+    <h1>Reporte mensual de expansión urbana en Bogotá</h1>
+    <div class="note">{month} {year}</div> 
+
+    <h2>Resumen</h2>
+    <div class="card--alert">
+      <p>{mensaje}</p>
+    </div>
+
+    <div class="card">
+      <h2>Metodología</h2>
+      <p>Para la detección de nuevas construcciones se utiliza un enfoque de análisis temporal con radar Sentinel-1 (banda VV) y validación óptica con Sentinel-2 (índice NDVI calculado), procesados mediante Google Earth Engine y Sentinel Hub.</p>
+      <p>El proceso consta de los siguientes pasos:</p>
+      <ol>
+        <li><strong>Descarga de imágenes Sentinel-1 SAR (banda VV):</strong> Se obtienen imágenes del mes actual y del mes anterior para calcular la diferencia temporal.</li>
+        <li><strong>Cálculo de diferencia temporal (Δ VV):</strong> Se identifica el incremento de retrodispersión radar entre ambos periodos.</li>
+        <li><strong>Detección de cambios significativos:</strong> Se aplica un umbral en el percentil 99 de las diferencias para identificar zonas con cambios relevantes.</li>
+        <li><strong>Vectorización:</strong> Las áreas detectadas se convierten en polígonos geográficos.</li>
+        <li><strong>Filtro de vegetación (NDVI):</strong> Se descarta vegetación usando índice NDVI < 0.1 de Sentinel-2.</li>
+        <li><strong>Exclusión de construcciones existentes:</strong> Se eliminan polígonos que intersectan con el catastro de construcciones, malla vial y aeropuerto de Bogotá.</li>
+      </ol>
+      <p>El resultado final identifica nuevas construcciones en áreas previamente no construidas, con una resolución espacial de 10 metros.</p>
+      <div class="note">Para más información sobre los datos <a href="https://sentinels.copernicus.eu/copernicus/sentinel-1" target="_blank"> Sentinel-1</a></div>
+    </div>
+  </div>
+  
+  <footer class="banner">
+    <img src="{footer_url}" alt="Secretaría de Planeación">
+  </footer>
+</body>
+</html>"""
+    
+    html_path = os.path.join(output_dir, f"urban_sprawl_reporte_{year}_{mes_num:02d}.html")
     with open(html_path, "w", encoding="utf-8") as f:
-        f.write(f"<html><body><h1>Sin expansion detectada - {month}/{year}</h1></body></html>")
+        f.write(html_content)
+    
+    print(f"✅ Reporte sin expansión generado: {html_path}")
     return html_path

@@ -52,10 +52,10 @@ def main(anio: int, mes: int):
         previous_month_str = datetime(anio - 1, 12, 1).strftime("%B").capitalize()
     else:
         previous_month_str = datetime(anio, mes - 1, 1).strftime("%B").capitalize()
-    print(f"🗓️ Ejecutando análisis para {month_str} {anio}")
+    print(f"[INICIO] Ejecutando análisis para {month_str} {anio}")
 
     # === 1. Limpiar temp_data al inicio ===
-    print("\n🧹 Limpiando carpeta temporal antes de iniciar...")
+    print("\n[CLEANUP] Limpiando carpeta temporal antes de iniciar...")
     cleanup_temp_data()
 
     # === Fechas ===
@@ -73,7 +73,7 @@ def main(anio: int, mes: int):
 
     # === 1. Detección de Construcciones Nuevas (Sentinel-1 VV + NDVI) ===
     print("\n" + "="*70)
-    print("🛰️ INICIANDO DETECCIÓN DE CONSTRUCCIONES NUEVAS")
+    print("[DETECCION] INICIANDO DETECCION DE CONSTRUCCIONES NUEVAS")
     print("   Metodología: Sentinel-1 VV Temporal + NDVI")
     print("="*70)
     
@@ -106,7 +106,7 @@ def main(anio: int, mes: int):
         if new_urban_path and os.path.exists(new_urban_path):
             print(f"\n✅ Construcciones nuevas detectadas: {new_urban_path}")
         else:
-            print(f"\n⏭️ No se detectaron construcciones nuevas para {month_str} {anio}")
+            print(f"\n[RESULTADO] No se detectaron construcciones nuevas para {month_str} {anio}")
             print(f"📄 Generando reporte sin expansión...")
             from src.pipeline_utils import build_no_expansion_report
             build_no_expansion_report(
@@ -130,19 +130,19 @@ def main(anio: int, mes: int):
 
     # === 2. Intersecciones con Áreas Protegidas ===
     print("\n" + "="*70)
-    print("📊 CALCULANDO INTERSECCIONES CON ÁREAS PROTEGIDAS")
+    print("[INTERSECCIONES] CALCULANDO INTERSECCIONES CON AREAS PROTEGIDAS")
     print("="*70)
     create_intersections(new_urban_path, SAC_PATH, RESERVA_PATH, EEP_PATH, dirs["intersections"], anio, mes)
     
     # === 3. Estadísticas ===
     print("\n" + "="*70)
-    print("📊 CALCULANDO ESTADÍSTICAS")
+    print("[ESTADISTICAS] CALCULANDO ESTADISTICAS")
     print("="*70)
     calculate_expansion_areas(dirs["intersections"], dirs["stats"], UPL_PATH, anio, mes)
 
     # === 4. Mapas Sentinel ===
     print("\n" + "="*70)
-    print("🗺️ GENERANDO MAPAS")
+    print("[MAPAS] GENERANDO MAPAS")
     print("="*70)
     try:
         map_html = generate_maps(
@@ -218,7 +218,7 @@ def main(anio: int, mes: int):
                 mes_num=mes
             )
     else:
-        print(f"⏭️ No se detectó expansión urbana para {month_str} {anio}")
+        print(f"[RESULTADO] No se detectó expansión urbana para {month_str} {anio}")
         print(f"📄 Generando reporte sin expansión...")
         from src.pipeline_utils import build_no_expansion_report
         build_no_expansion_report(
@@ -242,7 +242,7 @@ def main(anio: int, mes: int):
             for file in files:
                 # Saltar archivos legacy de Dynamic World
                 if any(pattern in file for pattern in legacy_patterns):
-                    print(f"⏭️ Omitiendo {file} (archivo legacy)")
+                    print(f"[SKIP] Omitiendo {file} (archivo legacy)")
                     continue
                     
                 local_path = os.path.join(root, file)
@@ -252,7 +252,7 @@ def main(anio: int, mes: int):
                 blob.upload_from_filename(local_path)
                 print(f"✅ Subido {local_path} a gs://{gcs_bucket}/{gcs_path}")
 
-    print("☁️ Subiendo outputs a GCS...")
+    print("[GCS] Subiendo outputs a GCS...")
     fecha_rango = f"{anio}_{mes:02d}"
     upload_folder_to_gcs(OUTPUT_FOLDER, GCS_OUTPUT_BUCKET, f"{GCS_OUTPUT_PREFIX}/{fecha_rango}")
 

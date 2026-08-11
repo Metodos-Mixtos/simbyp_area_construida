@@ -43,20 +43,22 @@ URB_PROB = 0.5  # Probabilidad umbral para detectar expansión urbana (rango: 0.
 # 7. Extrae polígonos con cambio significativo (percentil configurable, por defecto 99.5)
 # 8. Filtra por NDVI < threshold para excluir vegetación
 
-# Rutas a archivos locales de construcciones
+# Ruta a construcciones existentes (Google Cloud Storage)
 # 
-# CONST_repaired.gpkg: 2.4M construcciones INDIVIDUALES
-#   - Más preciso: Detecta construcciones en huecos entre edificios
-#   - Más lento: 100-1000x tiempo de procesamiento
-#   - Usa en: Análisis detallados, zonas específicas, replicar notebook
-#
-# CONST_repaired_dissolve.gpkg: 1 polígono ÚNICO fusionado
-#   - Más rápido: 1000x velocidad (producción mensual)
+# CONST_repaired_dissolve.gpkg: 1 polígono ÚNICO fusionado con buffer de 3m aplicado
+#   - 2.4M construcciones fusionadas en 1 polígono
+#   - Buffer de 3m aplicado en CRS proyectado (EPSG:3116 Bogotá)
+#   - 1000x más rápido que construcciones individuales
 #   - Más conservador: NO detecta construcciones en espacios internos
-#   - Usa en: Pipeline automatizado, procesamiento masivo
+#   - Uso: Pipeline automatizado, procesamiento mensual en producción
 #
-CONSTRUCCIONES_GPKG_LOCAL = r"C:\Users\Laura Tamayo\Downloads\const.gpkg.0626\CONST_repaired.gpkg"
-CONSTRUCCIONES_GPKG_DISSOLVE = "C:/Users/Laura Tamayo/Downloads/const.gpkg.0626/CONST_buffer3m_dissolve_EPSG3116.gpkg"
+CONSTRUCCIONES_GPKG_DISSOLVE = "gs://material-estatico-sdp/SIMBYP_DATA/area_estudio/urban_sprawl/CONST_buffer3m_dissolve_EPSG3116.gpkg"
+
+# Malla vial de Bogotá (para exclusión en análisis)
+MALLA_VIAL_GPKG = "gs://material-estatico-sdp/SIMBYP_DATA/area_estudio/urban_sprawl/MallaVialBog26.gpkg"
+
+# Complejo aeroportuario El Dorado (para exclusión en análisis)
+AEROPUERTO_GPKG = "gs://material-estatico-sdp/SIMBYP_DATA/area_estudio/urban_sprawl/complejo_aeroportuario_dorado.gpkg"
 
 # Credenciales Sentinel Hub (Copernicus Dataspace)
 # Almacenadas en GCP Secret Manager para seguridad
@@ -124,7 +126,7 @@ SENTINEL1_LOOKBACK_DAYS = 30  # [DEPRECADO] No se usa - se usa mes completo
 # 0.1-0.3  = vegetación dispersa, jardines
 # 0.3-0.5  = pastizales, vegetación moderada
 # > 0.5    = bosque denso andino
-NDVI_THRESHOLD = 0.05  # < 0.05 = sin vegetación (MÁS ESTRICTO - solo suelo/concreto)
+NDVI_THRESHOLD = 0.1  # < 0.05 = sin vegetación (MÁS ESTRICTO - solo suelo/concreto)
 
 # Filtro de cobertura de nubes Sentinel-2
 # Porcentaje máximo de nubes permitido en imágenes
@@ -144,4 +146,5 @@ MIN_AREA_M2 = 200  # Elimina polígonos < 300 m² (mínimo ~3 píxeles)
 # 99 = 1% superior (más inclusivo, más detecciones)
 # 99.5 = 0.5% superior (más estricto, solo cambios muy significativos)
 # 99.9 = 0.1% superior (muy estricto, cambios extremos)
-DETECTION_PERCENTILE = 99  # 0.5% superior de diferencias temporales
+DETECTION_PERCENTILE = 99
+  # 0.5% superior de diferencias temporales
