@@ -333,14 +333,32 @@ def export_sentinel_as_png(
 
 def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path=None, tiles_before=None, tiles_current=None, png_images=None, construcciones_path=None):
     
-    """Generar mapa interactivo de expansión urbana con folium."""
+    """Generar mapa interactivo de expansión urbana - OPTIMIZADO para PNG."""
+    
+    # Si hay imágenes PNG, usar HTML personalizado en vez de Folium
+    if png_images and "t1_tiles" in png_images and len(png_images["t1_tiles"]) > 0:
+        create_custom_leaflet_map(
+            intersections_dir=intersections_dir,
+            sac_path=sac_path,
+            reserva_path=reserva_path,
+            eep_path=eep_path,
+            output_path=output_path,
+            month_str=month_str,
+            previous_month_str=previous_month_str,
+            year=year,
+            aoi_path=aoi_path,
+            png_images=png_images,
+            construcciones_path=construcciones_path
+        )
+        return
 
+    # Fallback: usar Folium (para casos sin PNG)
     # Leer y limpiar capas base
     gdf_sac = sanitize_gdf(gpd.read_file(sac_path).to_crs(epsg=4326))
     gdf_res = sanitize_gdf(gpd.read_file(reserva_path).to_crs(epsg=4326))
     gdf_eep = sanitize_gdf(gpd.read_file(eep_path).to_crs(epsg=4326))
 
-    # Filtrar SAC (solo categorías relevantes)
+    # Filtrar SAC
     sac_filtro = [
         "Expansión urbana y asentamientos ilegales",
         "Invasión de áreas protegidas",
@@ -353,51 +371,9 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     # Crear mapa base
     m = folium.Map(location=[4.65, -74.1], zoom_start=11, tiles="cartodb positron")
     
-    #  Definir límites del mapa según las capas disponibles
     gdf_aoi = gpd.read_file(aoi_path).to_crs(epsg=4326)
-    minx, miny, maxx, maxy = gdf_aoi.total_bounds
-    bounds = [[miny, minx], [maxy, maxx]]
     
-    # Capas Sentinel RGB - usar mosaico de tiles PNG si está disponible
-    if png_images and "t1_tiles" in png_images:
-        # Usar rutas ABSOLUTAS para que Folium pueda encontrar los archivos
-        # Luego haremos post-procesamiento del HTML para convertirlas a relativas
-        output_dir = os.path.dirname(output_path)
-        
-        # === PERIODO T1 (mes anterior) - Añadir todos los tiles ===
-        t1_group = folium.FeatureGroup(name=f"Sentinel-2 {previous_month_str} {year}", show=True)
-        
-        for tile in png_images["t1_tiles"]:
-            # Usar ruta ABSOLUTA (Folium las embebe como base64 por defecto, pero las necesita para leerlas)
-            folium.raster_layers.ImageOverlay(
-                image=tile["path"],
-                bounds=tile["bounds"],
-                opacity=1.0,
-                interactive=False,
-                cross_origin=False,
-                zindex=1
-            ).add_to(t1_group)
-        
-        t1_group.add_to(m)
-        
-        # === PERIODO T2 (mes actual) - Añadir todos los tiles ===
-        t2_group = folium.FeatureGroup(name=f"Sentinel-2 {month_str} {year}", show=True)
-        
-        for tile in png_images["t2_tiles"]:
-            # Usar ruta ABSOLUTA
-            folium.raster_layers.ImageOverlay(
-                image=tile["path"],
-                bounds=tile["bounds"],
-                opacity=1.0,
-                interactive=False,
-                cross_origin=False,
-                zindex=1
-            ).add_to(t2_group)
-        
-        t2_group.add_to(m)
-        
-    elif tiles_before and tiles_current:
-        # Usar tiles dinámicos de EE
+    if tiles_before and tiles_current:
         folium.TileLayer(
             tiles=tiles_before,
             name=f"Sentinel-2 {previous_month_str} {year}",
@@ -410,168 +386,191 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
             tiles=tiles_current,
             name=f"Sentinel-2 {month_str} {year}",
             attr="Sentinel-2 EE Mosaic",
-        overlay=True,
-        show=False
-    ).add_to(m)
+            overlay=True,
+            show=False
+        ).add_to(m)
 
-    # === Capa de expansión urbana (construcciones nuevas detectadas) ===
     if construcciones_path and os.path.exists(construcciones_path):
         gdf_construcciones = sanitize_gdf(gpd.read_file(construcciones_path).to_crs(epsg=4326))
         folium.GeoJson(
             json.loads(gdf_construcciones.to_json()), 
             name="Expansión del área construida",
             style_function=lambda x: {
-                "color": "#FF6B00",      # Naranja
+                "color": "#FF6B00",
                 "weight": 1.5,
-                "fillColor": "#FF6B00",  # Naranja
-                "fillOpacity": 0.4       # Semitransparente
+                "fillColor": "#FF6B00",
+                "fillOpacity": 0.4
             },
-            show=True  # Visible por defecto
+            show=True
         ).add_to(m)
     
-    # === Capa de construcciones existentes (catastro) ===
-    # Usar GPKG disuelto para visualización rápida y completa
-    from src.config import CONSTRUCCIONES_GPKG_DISSOLVE
-    from src.aux_utils import download_gcs_to_temp
-    
-    # Descargar desde GCS si es necesario
-    construcciones_path = CONSTRUCCIONES_GPKG_DISSOLVE
-    if str(CONSTRUCCIONES_GPKG_DISSOLVE).startswith("gs://"):
-        print(f"\n📥 Descargando construcciones desde GCS...")
-        try:
-            construcciones_path = download_gcs_to_temp(CONSTRUCCIONES_GPKG_DISSOLVE)
-            print(f"   Descargado a: {construcciones_path}")
-        except Exception as e:
-            print(f"   ⚠️ Error descargando desde GCS: {e}")
-            construcciones_path = None
-    
-    if construcciones_path and os.path.exists(construcciones_path):
-        print(f"\n📊 Cargando construcciones existentes (disueltas)...")
-        print(f"   Archivo: {Path(construcciones_path).name}")
-        
-        try:
-            gdf_const_dissolve = gpd.read_file(construcciones_path)
-            
-            # Reproyectar si es necesario
-            if gdf_const_dissolve.crs != 'EPSG:4326':
-                gdf_const_dissolve = gdf_const_dissolve.to_crs('EPSG:4326')
-            
-            # Filtrar al área del mapa (bbox del AOI)
-            if hasattr(gdf_aoi, 'total_bounds'):
-                bounds = gdf_aoi.total_bounds
-                gdf_const_dissolve = gdf_const_dissolve.cx[bounds[0]:bounds[2], bounds[1]:bounds[3]]
-            
-            gdf_const_dissolve = sanitize_gdf(gdf_const_dissolve)
-            print(f"   Geometrías: {len(gdf_const_dissolve)}")
-            
-            folium.GeoJson(
-                json.loads(gdf_const_dissolve.to_json()),
-                name="Construcciones existentes (Catastro)",
-                style_function=lambda x: {
-                    "color": "#999999",      # Gris medio borde
-                    "weight": 1,
-                    "fillColor": "#DDDDDD",  # Gris claro relleno
-                    "fillOpacity": 0.3       # Semitransparente
-                },
-                show=False  # Oculto por defecto
-            ).add_to(m)
-            print(f"   ✅ Capa de construcciones añadida al mapa")
-            
-        except Exception as e:
-            print(f"   ⚠️ Error cargando GPKG disuelto: {e}")
-    else:
-        print(f"\n⚠️ No se encontró GPKG disuelto: {CONSTRUCCIONES_GPKG_DISSOLVE}")
-        
-        # Fallback: buscar archivo generado por el pipeline
-        output_root = os.path.dirname(intersections_dir) if intersections_dir else None
-        if output_root:
-            construcciones_path = os.path.join(output_root, "new_constructions", "construcciones_existentes.geojson")
-            if os.path.exists(construcciones_path):
-                print(f"   Usando archivo del pipeline como fallback...")
-                gdf_const = sanitize_gdf(gpd.read_file(construcciones_path).to_crs(epsg=4326))
-                n_total = len(gdf_const)
-                
-                # Muestreo si hay demasiados
-                if n_total > 50000:
-                    gdf_const = gdf_const.sample(n=50000, random_state=42)
-                    print(f"   Muestra: 50,000 de {n_total:,}")
-                
-                folium.GeoJson(
-                    json.loads(gdf_const.to_json()),
-                    name="Construcciones existentes (Catastro)",
-                    style_function=lambda x: {
-                        "color": "#CCCCCC",
-                        "weight": 0.5,
-                        "fillColor": "#DDDDDD",
-                        "fillOpacity": 0.2
-                    },
-                    show=False
-                ).add_to(m)
-        
-    # === Capas ambientales y de protección ===
     folium.GeoJson(
         json.loads(gdf_sac.to_json()), 
         name="Conflictos Socioambientales",
-        style_function=lambda x: {
-            "color": "#E31A1C",    # Rojo
-            "weight": 1,
-            "fillColor": "#E31A1C",
-            "fillOpacity": 0.2
-        }, 
+        style_function=lambda x: {"color": "#E31A1C", "weight": 1, "fillColor": "#E31A1C", "fillOpacity": 0.2}, 
         show=False
     ).add_to(m)
     
     folium.GeoJson(
         json.loads(gdf_res.to_json()), 
         name="Cerros Orientales",
-        style_function=lambda x: {
-            "color": "#073013",    # Verde oscuro
-            "weight": 1,
-            "fillColor": "#073013",
-            "fillOpacity": 0.3
-        }, 
+        style_function=lambda x: {"color": "#073013", "weight": 1, "fillColor": "#073013", "fillOpacity": 0.3}, 
         show=False
     ).add_to(m)
     
     folium.GeoJson(
         json.loads(gdf_eep.to_json()), 
         name="Estructura Ecológica Principal",
-        style_function=lambda x: {
-            "color": "#388900",    # Verde
-            "weight": 1,
-            "fillColor": "#388900",
-            "fillOpacity": 0.2
-        }, 
+        style_function=lambda x: {"color": "#388900", "weight": 1, "fillColor": "#388900", "fillOpacity": 0.2}, 
         show=False
     ).add_to(m)
 
-    # Control de capas
     folium.LayerControl(collapsed=False).add_to(m)
     m.save(output_path)
+    print(f"   ✅ Mapa guardado: {output_path}")
+
+
+def create_custom_leaflet_map(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path, png_images, construcciones_path):
+    """Crear mapa HTML personalizado con Leaflet para manejar PNG eficientemente."""
     
-    # Post-procesamiento: convertir rutas absolutas embebidas a rutas relativas
-    if png_images and "t1_tiles" in png_images:
-        output_dir = os.path.dirname(output_path)
-        
-        # Leer el HTML generado
-        with open(output_path, 'r', encoding='utf-8') as f:
-            html_content = f.read()
-        
-        # Reemplazar rutas absolutas por relativas
-        for tile in png_images["t1_tiles"] + png_images["t2_tiles"]:
-            abs_path = tile["path"]
-            rel_path = os.path.relpath(abs_path, output_dir).replace("\\", "/")
-            
-            # Folium puede embedder como base64 o como ruta, buscar ambos patrones
-            # Patrón 1: url("file:///C:/ruta/absoluta/tile.png")
-            html_content = html_content.replace(f'file:///{abs_path.replace(chr(92), "/")}', rel_path)
-            html_content = html_content.replace(abs_path.replace("\\", "/"), rel_path)
-            html_content = html_content.replace(abs_path, rel_path)
-        
-        # Guardar el HTML modificado
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(html_content)
+    # Leer capas GeoJSON
+    gdf_sac = sanitize_gdf(gpd.read_file(sac_path).to_crs(epsg=4326))
+    gdf_res = sanitize_gdf(gpd.read_file(reserva_path).to_crs(epsg=4326))
+    gdf_eep = sanitize_gdf(gpd.read_file(eep_path).to_crs(epsg=4326))
     
+    # Filtrar SAC
+    sac_filtro = [
+        "Expansión urbana y asentamientos ilegales",
+        "Invasión de áreas protegidas",
+        "Ocupación por habitante de calle y cambuches",
+        "Zonas con riesgo de remoción en masa, flujos y receptaciones"
+    ]
+    if "sac" in gdf_sac.columns:
+        gdf_sac = gdf_sac[gdf_sac["sac"].isin(sac_filtro)]
+    
+    # Construcciones nuevas
+    construcciones_geojson = "{}"
+    if construcciones_path and os.path.exists(construcciones_path):
+        gdf_construcciones = sanitize_gdf(gpd.read_file(construcciones_path).to_crs(epsg=4326))
+        construcciones_geojson = gdf_construcciones.to_json()
+    
+    # Generar rutas relativas para tiles PNG
+    output_dir = os.path.dirname(output_path)
+    t1_tiles_js = []
+    t2_tiles_js = []
+    
+    for tile in png_images["t1_tiles"]:
+        rel_path = os.path.relpath(tile["path"], output_dir).replace("\\", "/")
+        b = tile["bounds"]
+        t1_tiles_js.append(f"L.imageOverlay('{rel_path}', [[{b[0][0]}, {b[0][1]}], [{b[1][0]}, {b[1][1]}]])")
+    
+    for tile in png_images["t2_tiles"]:
+        rel_path = os.path.relpath(tile["path"], output_dir).replace("\\", "/")
+        b = tile["bounds"]
+        t2_tiles_js.append(f"L.imageOverlay('{rel_path}', [[{b[0][0]}, {b[0][1]}], [{b[1][0]}, {b[1][1]}]])")
+    
+    # HTML template completo
+    html_content = f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Mapa de Expansión Urbana - {month_str} {year}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body {{ margin: 0; padding: 0; }}
+        #map {{ position: absolute; top: 0; bottom: 0; width: 100%; }}
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        var map = L.map('map').setView([4.65, -74.1], 11);
+        
+        // Mapa base
+        var baseLayer = L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+            attribution: '© OpenStreetMap contributors © CARTO',
+            maxZoom: 19
+        }}).addTo(map);
+        
+        // Sentinel-2 periodo anterior (T1)
+        var sentinel_t1 = L.layerGroup([
+            {',\n            '.join(t1_tiles_js)}
+        ]).addTo(map);
+        
+        // Sentinel-2 periodo actual (T2)
+        var sentinel_t2 = L.layerGroup([
+            {',\n            '.join(t2_tiles_js)}
+        ]);
+        
+        // Expansión urbana (construcciones nuevas)
+        var expansion_layer = L.geoJSON({construcciones_geojson}, {{
+            style: {{
+                color: '#FF6B00',
+                weight: 1.5,
+                fillColor: '#FF6B00',
+                fillOpacity: 0.4
+            }}
+        }}).addTo(map);
+        
+        // SAC
+        var sac_layer = L.geoJSON({gdf_sac.to_json()}, {{
+            style: {{
+                color: '#E31A1C',
+                weight: 1,
+                fillColor: '#E31A1C',
+                fillOpacity: 0.2
+            }}
+        }});
+        
+        // Cerros Orientales
+        var cerros_layer = L.geoJSON({gdf_res.to_json()}, {{
+            style: {{
+                color: '#073013',
+                weight: 1,
+                fillColor: '#073013',
+                fillOpacity: 0.3
+            }}
+        }});
+        
+        // EEP
+        var eep_layer = L.geoJSON({gdf_eep.to_json()}, {{
+            style: {{
+                color: '#388900',
+                weight: 1,
+                fillColor: '#388900',
+                fillOpacity: 0.2
+            }}
+        }});
+        
+        // Control de capas
+        var baseMaps = {{
+            "CartoDB Positron": baseLayer
+        }};
+        
+        var overlayMaps = {{
+            "Sentinel-2 {previous_month_str} {year}": sentinel_t1,
+            "Sentinel-2 {month_str} {year}": sentinel_t2,
+            "Expansión del área construida": expansion_layer,
+            "Conflictos Socioambientales": sac_layer,
+            "Cerros Orientales": cerros_layer,
+            "Estructura Ecológica Principal": eep_layer
+        }};
+        
+        L.control.layers(baseMaps, overlayMaps, {{collapsed: false}}).addTo(map);
+    </script>
+</body>
+</html>'''
+    
+    # Guardar HTML
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    
+    print(f"   ✅ Mapa personalizado guardado: {output_path}")
+    print(f"   ✅ {len(png_images['t1_tiles'])} tiles T1 + {len(png_images['t2_tiles'])} tiles T2")
+
+
 def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, year, mes, sac, reserva, eep, construcciones_path=None):
     """Genera mosaicos Sentinel y mapa interactivo usando PNG estáticos (optimizado)"""
     # Exportar imágenes Sentinel como PNG (solo tiles con expansión urbana)
@@ -599,3 +598,4 @@ def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_
         construcciones_path=construcciones_path
     )
     return map_html
+

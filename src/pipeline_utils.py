@@ -48,7 +48,8 @@ def prepare_folders(base_path, anio, mes):
     output_dir = os.path.join(output_base, f"{anio}_{mes:02d}")
     os.makedirs(output_dir, exist_ok=True)
     
-    dirs = {k: os.path.join(output_dir, k) for k in ["new_constructions", "sentinel", "intersections", "maps", "stats", "reportes"]}
+    # NOTA: 'sentinel' eliminado - las imágenes PNG ahora se guardan en maps/sentinel_YYYY-MM-DD_t1/
+    dirs = {k: os.path.join(output_dir, k) for k in ["new_constructions", "intersections", "maps", "stats", "reportes"]}
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
     return dirs
@@ -1160,9 +1161,10 @@ def process_new_constructions(geometry, output_dir, year, month, sh_config):
     
     # Cargar malla vial para exclusión
     print(f"\n[GPKG] Cargando malla vial...")
+    malla_vial_path = Path(str(construcciones_path).replace('construcciones', 'malla_vial'))
     gdf_malla_vial = download_catastro_construcciones(
         geometry,
-        construcciones_path.replace('construcciones', 'malla_vial'),
+        malla_vial_path,
         local_gpkg_path=MALLA_VIAL_GPKG,
         apply_buffer_m=0  # Sin buffer para malla vial
     )
@@ -1170,9 +1172,10 @@ def process_new_constructions(geometry, output_dir, year, month, sh_config):
     
     # Cargar aeropuerto para exclusión
     print(f"\n[GPKG] Cargando aeropuerto...")
+    aeropuerto_path = Path(str(construcciones_path).replace('construcciones', 'aeropuerto'))
     gdf_aeropuerto = download_catastro_construcciones(
         geometry,
-        construcciones_path.replace('construcciones', 'aeropuerto'),
+        aeropuerto_path,
         local_gpkg_path=AEROPUERTO_GPKG,
         apply_buffer_m=0  # Sin buffer para aeropuerto
     )
@@ -1374,7 +1377,7 @@ def build_report(df_path, map_html, header_img1_path, header_img2_path, footer_i
     # Manejar caso cuando map_html es None (falló generación de mapa)
     map_rel = ""
     if map_html and os.path.exists(map_html):
-        map_rel = os.path.relpath(map_html, output_dir)
+        map_rel = os.path.relpath(map_html, output_dir).replace("\\", "/")
     
     # Preparar datos para el template
     template_data = {
