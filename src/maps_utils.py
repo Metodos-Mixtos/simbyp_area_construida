@@ -468,6 +468,9 @@ def create_custom_leaflet_map(intersections_dir, sac_path, reserva_path, eep_pat
         rel_path = os.path.relpath(tile["path"], output_dir).replace("\\", "/")
         b = tile["bounds"]
         t2_tiles_js.append(f"L.imageOverlay('{rel_path}', [[{b[0][0]}, {b[0][1]}], [{b[1][0]}, {b[1][1]}]])")
+
+    t1_tiles_layers = ',\n            '.join(t1_tiles_js)
+    t2_tiles_layers = ',\n            '.join(t2_tiles_js)
     
     # HTML template completo
     html_content = f'''<!DOCTYPE html>
@@ -496,12 +499,12 @@ def create_custom_leaflet_map(intersections_dir, sac_path, reserva_path, eep_pat
         
         // Sentinel-2 periodo anterior (T1)
         var sentinel_t1 = L.layerGroup([
-            {',\n            '.join(t1_tiles_js)}
+            {t1_tiles_layers}
         ]).addTo(map);
         
         // Sentinel-2 periodo actual (T2)
         var sentinel_t2 = L.layerGroup([
-            {',\n            '.join(t2_tiles_js)}
+            {t2_tiles_layers}
         ]);
         
         // Expansión urbana (construcciones nuevas)
