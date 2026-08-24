@@ -27,8 +27,75 @@ from src.config import (
     GCS_OUTPUT_BUCKET, GCS_OUTPUT_PREFIX, URB_PROB,
     BUFFER_CONSTRUCCIONES_METROS, SENTINEL1_RESOLUTION,
     NDVI_THRESHOLD, CLOUD_THRESHOLD, MIN_AREA_M2, DETECTION_PERCENTILE,
-    CONSTRUCCIONES_GPKG_DISSOLVE, MALLA_VIAL_GPKG, AEROPUERTO_GPKG
+    CONSTRUCCIONES_GPKG_DISSOLVE, MALLA_VIAL_GPKG, AEROPUERTO_GPKG,
+    BUCKET_BASE_URL
 )
+from src.maps_utils import get_map_url
+
+def get_downloadable_url(year: int, month: int, filename: str, subfolder: str = None) -> str:
+    """
+    Genera URL de GCS para archivos descargables individuales.
+    
+    Args:
+        year: Año (ej: 2026)
+        month: Mes (ej: 7)
+        filename: Nombre del archivo descargable
+        subfolder: Subcarpeta ('dw', 'intersections', 'stats') si es necesario
+    
+    Returns:
+        URL completa de GCS (ej: https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/dw/new_urban_2026_07.geojson)
+    
+    Ejemplos:
+        # Archivo de construcciones nuevas
+        get_downloadable_url(2026, 7, "new_urban_2026_07.geojson", "dw")
+        
+        # Archivo de intersecciones
+        get_downloadable_url(2026, 7, "new_urban_2026_07_intersections.geojson", "intersections")
+        
+        # Archivo de estadísticas
+        get_downloadable_url(2026, 7, "resumen_expansion_upl_ha_2026_07.csv", "stats")
+    """
+    year_month = f"{year}_{month:02d}"
+    if subfolder:
+        return f"{BUCKET_BASE_URL}/urban_sprawl/{year_month}/{subfolder}/{filename}"
+    return f"{BUCKET_BASE_URL}/urban_sprawl/{year_month}/{filename}"
+
+
+def get_downloadable_urls(year: int, month: int) -> dict:
+    """
+    Genera un diccionario con todas las URLs de archivos descargables.
+    Centraliza la generación de URLs para los 4 archivos principales del reporte.
+    
+    Args:
+        year: Año (ej: 2026)
+        month: Mes (ej: 7)
+    
+    Returns:
+        Diccionario con URLs para todos los archivos descargables:
+        - new_urban: GeoJSON con construcciones nuevas detectadas
+        - intersections: GeoJSON con intersecciones a UPL
+        - no_intersections: GeoJSON sin intersecciones a UPL
+        - stats_csv: CSV con estadísticas de expansión
+    
+    Ejemplo:
+        urls = get_downloadable_urls(2026, 7)
+        # Retorna:
+        # {
+        #   "new_urban": "https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/dw/new_urban_2026_07.geojson",
+        #   "intersections": "https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/intersections/new_urban_2026_07_intersections.geojson",
+        #   "no_intersections": "https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/intersections/new_urban_2026_07_no_intersections.geojson",
+        #   "stats_csv": "https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/stats/resumen_expansion_upl_ha_2026_07.csv"
+        # }
+    """
+    year_month = f"{year}_{month:02d}"
+    base_url = f"{BUCKET_BASE_URL}/urban_sprawl/{year_month}"
+    return {
+        "new_urban": f"{base_url}/dw/new_urban_{year_month}.geojson",
+        "intersections": f"{base_url}/intersections/new_urban_{year_month}_intersections.geojson",
+        "no_intersections": f"{base_url}/intersections/new_urban_{year_month}_no_intersections.geojson",
+        "stats_csv": f"{base_url}/stats/resumen_expansion_upl_ha_{year_month}.csv",
+    }
+
 from reporte.render_report import render
 
 # ============================================
@@ -1376,8 +1443,14 @@ def build_report(df_path, map_html, header_img1_path, header_img2_path, footer_i
     
     # Manejar caso cuando map_html es None (falló generación de mapa)
     map_rel = ""
+    map_url_gcs = ""
     if map_html and os.path.exists(map_html):
         map_rel = os.path.relpath(map_html, output_dir).replace("\\", "/")
+        # También generar URL de GCS para el mapa
+        map_url_gcs = get_map_url(year, mes_num)
+    
+    # Generar URLs de GCS para archivos descargables
+    downloadable_urls = get_downloadable_urls(year, mes_num)
     
     # Preparar datos para el template
     template_data = {
@@ -1388,16 +1461,24 @@ def build_report(df_path, map_html, header_img1_path, header_img2_path, footer_i
         "FOOTER_IMG": footer_rel,
         "TOP_UPLS": [{"UPL": row['NOMBRE'], "INTER_HA": f"{row['interseccion_ha']:.2f}", "TOTAL_HA": f"{row['total_ha']:.2f}"} for row in top_upls],
         "MAP_IFRAME_URL": map_rel,
+        "MAP_URL_GCS": map_url_gcs,  # URL pública de GCS del mapa
         "FUENTE": "Fuente: Sentinel-1 y Sentinel-2 de Copernicus y Google Earth Engine.",
         "URB_PROB_PERCENT": "20",
+        # URLs de GCS para archivos descargables (reemplazan rutas relativas)
+        "TIF_URL": downloadable_urls["new_urban"],
+        "INTER_GEOJSON_URL": downloadable_urls["intersections"],
+        "NO_INTER_GEOJSON_URL": downloadable_urls["no_intersections"],
+        "CSV_URL": downloadable_urls["stats_csv"],
+        # Nombres de archivo (para compatibilidad hacia atrás si el template los requiere)
         "TIF_FILENAME": f"new_urban_{year}_{mes_num:02d}.geojson",
         "INTER_GEOJSON_FILENAME": f"new_urban_{year}_{mes_num:02d}_intersections.geojson",
         "NO_INTER_GEOJSON_FILENAME": f"new_urban_{year}_{mes_num:02d}_no_intersections.geojson",
         "CSV_FILENAME": f"resumen_expansion_upl_ha_{year}_{mes_num:02d}.csv"
     }
     
-    # Crear archivo temporal con los datos JSON
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as temp_data:
+    # Crear archivo temporal con los datos JSON en directorio del sistema (no en la carpeta de reportes)
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8', dir=None) as temp_data:
         json.dump(template_data, temp_data, ensure_ascii=False, indent=2)
         temp_data_path = temp_data.name
     
@@ -1411,11 +1492,13 @@ def build_report(df_path, map_html, header_img1_path, header_img2_path, footer_i
         print(f"✅ Reporte generado: {output_path}")
         return str(output_path)
     finally:
-        # Limpiar archivo temporal
+        # Limpiar archivo temporal (crítico - no debe subirse a GCS)
         try:
-            os.unlink(temp_data_path)
-        except:
-            pass
+            if os.path.exists(temp_data_path):
+                os.unlink(temp_data_path)
+                print(f"   🗑️ Archivo temporal eliminado: {os.path.basename(temp_data_path)}")
+        except Exception as e:
+            print(f"   ⚠️ Error limpiando temporal: {e}")
 
 
 def build_no_expansion_report(header_img1_path, header_img2_path, footer_img_path, output_dir, month, year, mes_num, custom_message=None):

@@ -46,6 +46,7 @@
 
     <section id="mapa">
     <h2>Mapa interactivo</h2>
+    <!-- Mapa también disponible en: {{MAP_URL_GCS}} -->
     <iframe src="{{MAP_IFRAME_URL}}" width="100%" height="600px" frameborder="0"></iframe>
     <p style="font-size:12px; color:#555; margin-top:8px;">{{FUENTE}}</p>
     </section>
@@ -64,7 +65,7 @@
         <li><strong>Exclusión de construcciones existentes:</strong> Se eliminan polígonos que intersectan con el catastro de construcciones, malla vial y aeropuerto de Bogotá, garantizando que solo se reporten edificaciones nuevas.</li>
       </ol>
       
-      <p>El resultado final identifica nuevas construcciones en áreas previamente no construidas, con una resolución espacial de 10 metros.</p>
+      <p>El resultado final identifica nuevas construcciones en áreas previamente no construidas, con una resolución espacial de 10 metros. </p>
       
       <p>Posteriormente, las nuevas construcciones detectadas se intersectaron con tres capas ambientales y normativas clave:</p>
       <ul>
@@ -73,7 +74,7 @@
         <li><strong>Estructura Ecológica Principal (EEP):</strong> Define las áreas estratégicas para la conectividad ecológica y la provisión de servicios ecosistémicos.</li>
       </ul>
 
-      <p>Estas intersecciones entre los nuevos procesos de construcción y los espacios ambientalmente sensibles, permiten diferenciar preliminarmente las zonas en donde la construcción es permitida y las zonas en donde tiene restricciones.</p>
+      <p>Estas intersecciones entre los nuevos procesos de construcción y los espacios ambientalmente sensibles, permiten diferenciar preliminarmente las zonas en donde la construcción es permitida y las zonas en donde tiene restricciones. Esta metodología no posee una precisión del 100%. Pueden presentarse errores como falsos positivos (áreas detectadas como construcción que no lo son) o falsos negativos (construcciones reales que no se detectan). Estos errores pueden deberse a limitaciones en la resolución espacial de las imágenes satelitales (10m), condiciones atmosféricas, cobertura de nubes, o características espectrales similares entre construcciones y otros materiales u otros cambios drásticos en el tipo de cobertura de una zona.</p>
 
       <div class="note">Para más información sobre los datos <a href="https://sentinels.copernicus.eu/web/sentinel/user-guides/sentinel-1-sar" target="_blank" rel="noopener noreferrer">Sentinel-1</a></div>
     </div>
@@ -83,10 +84,10 @@
         <h2>Archivos descargables</h2>
         <p>A continuación, puede descargar los archivos generados en este análisis:</p>
         <ul style="list-style-type: none; padding-left: 0;">
-          <li style="margin-bottom: 0.5rem;">📄 <a href="../dw/{{TIF_FILENAME}}" download>{{TIF_FILENAME}}</a> - Imagen raster de la expansión urbana detectada</li>
-          <li style="margin-bottom: 0.5rem;">🗺️ <a href="../intersections/{{INTER_GEOJSON_FILENAME}}" download>{{INTER_GEOJSON_FILENAME}}</a> - Áreas de expansión con intersección en zonas restringidas</li>
-          <li style="margin-bottom: 0.5rem;">🗺️ <a href="../intersections/{{NO_INTER_GEOJSON_FILENAME}}" download>{{NO_INTER_GEOJSON_FILENAME}}</a> - Áreas de expansión sin intersección en zonas restringidas</li>
-          <li style="margin-bottom: 0.5rem;">📊 <a href="../stats/{{CSV_FILENAME}}" download>{{CSV_FILENAME}}</a> - Resumen estadístico por UPL en hectáreas</li>
+          <li style="margin-bottom: 0.5rem;">📄 <a href="{{TIF_URL}}" download>{{TIF_FILENAME}}</a> - Detección de nuevas construcciones en formato GeoJSON</li>
+          <li style="margin-bottom: 0.5rem;">🗺️ <a href="{{INTER_GEOJSON_URL}}" download>{{INTER_GEOJSON_FILENAME}}</a> - Áreas de expansión con intersección en zonas restringidas</li>
+          <li style="margin-bottom: 0.5rem;">🗺️ <a href="{{NO_INTER_GEOJSON_URL}}" download>{{NO_INTER_GEOJSON_FILENAME}}</a> - Áreas de expansión sin intersección en zonas restringidas</li>
+          <li style="margin-bottom: 0.5rem;">📊 <a href="{{CSV_URL}}" download>{{CSV_FILENAME}}</a> - Resumen estadístico por UPL en hectáreas</li>
         </ul>
       </div>
     </section>

@@ -22,6 +22,9 @@ GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "bosques-bogota-416214"
 GCS_OUTPUT_BUCKET = "reportes-simbyp"
 GCS_OUTPUT_PREFIX = "urban_sprawl"
 
+# GCS URL base para acceso directo a los reportes en HTTPS
+BUCKET_BASE_URL = "https://storage.googleapis.com/reportes-simbyp"
+
 # Urban sprawl detection parameters
 URB_PROB = 0.5  # Probabilidad umbral para detectar expansión urbana (rango: 0.0 a 1.0)
 

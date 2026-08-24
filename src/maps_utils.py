@@ -6,7 +6,21 @@ import ee
 import pandas as pd
 import requests
 from pathlib import Path
-from src.config import GOOGLE_CLOUD_PROJECT, CLOUD_THRESHOLD
+from src.config import GOOGLE_CLOUD_PROJECT, CLOUD_THRESHOLD, BUCKET_BASE_URL, GCS_OUTPUT_PREFIX
+
+def get_map_url(year: int, month: int) -> str:
+    """
+    Genera la URL completa del mapa de expansión urbana en GCS.
+    
+    Args:
+        year: Año (ej: 2026)
+        month: Mes (ej: 7)
+    
+    Returns:
+        URL completa del mapa (ej: https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/maps/map_expansion_2026_07.html)
+    """
+    year_month = f"{year}_{month:02d}"
+    return f"{BUCKET_BASE_URL}/urban_sprawl/{year_month}/maps/map_expansion_{year_month}.html"
 
 def _ensure_ee_initialized():
     """
@@ -72,6 +86,21 @@ def sanitize_gdf(gdf):
             # Reemplazar cualquier valor problemático con su representación textual
             gdf[col] = gdf[col].apply(lambda v: str(v) if not isinstance(v, (int, float, str)) else v)
     return gdf
+
+def get_map_tile_gcs_url(year: int, month: int, tile_filename: str) -> str:
+    """
+    Genera URL de GCS para un tile PNG del mapa.
+    
+    Args:
+        year: Año (ej: 2026)
+        month: Mes (ej: 7)
+        tile_filename: Nombre del archivo (ej: "sentinel_2026-06-30_t1/tile_00.png")
+    
+    Returns:
+        URL completa de GCS (ej: https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/maps/...)
+    """
+    year_month = f"{year}_{month:02d}"
+    return f"{BUCKET_BASE_URL}/{GCS_OUTPUT_PREFIX}/{year_month}/maps/{tile_filename}"
 
 def get_tiles_from_ee(
     aoi_path: str,
@@ -331,9 +360,14 @@ def export_sentinel_as_png(
         "bounds": [[miny, minx], [maxy, maxx]]  # bounds completos del AOI
     }
 
-def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path=None, tiles_before=None, tiles_current=None, png_images=None, construcciones_path=None):
+def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path=None, tiles_before=None, tiles_current=None, png_images=None, construcciones_path=None, mes=None):
     
-    """Generar mapa interactivo de expansión urbana - OPTIMIZADO para PNG."""
+    """
+    Generar mapa interactivo de expansión urbana - OPTIMIZADO para PNG.
+    
+    Args:
+        mes: Número de mes (requerido para generar URLs de GCS del mapa)
+    """
     
     # Si hay imágenes PNG, usar HTML personalizado en vez de Folium
     if png_images and "t1_tiles" in png_images and len(png_images["t1_tiles"]) > 0:
@@ -348,7 +382,9 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
             year=year,
             aoi_path=aoi_path,
             png_images=png_images,
-            construcciones_path=construcciones_path
+            construcciones_path=construcciones_path,
+            mes=mes,
+            use_gcs_urls=True  # Habilitar URLs de GCS
         )
         return
 
@@ -430,8 +466,14 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
     print(f"   ✅ Mapa guardado: {output_path}")
 
 
-def create_custom_leaflet_map(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path, png_images, construcciones_path):
-    """Crear mapa HTML personalizado con Leaflet para manejar PNG eficientemente."""
+def create_custom_leaflet_map(intersections_dir, sac_path, reserva_path, eep_path, output_path, month_str, previous_month_str, year, aoi_path, png_images, construcciones_path, mes=None, use_gcs_urls=False):
+    """
+    Crear mapa HTML personalizado con Leaflet para manejar PNG eficientemente.
+    
+    Args:
+        use_gcs_urls: Si True, genera URLs de GCS en lugar de rutas relativas
+        mes: Número de mes (requerido si use_gcs_urls=True)
+    """
     
     # Leer capas GeoJSON
     gdf_sac = sanitize_gdf(gpd.read_file(sac_path).to_crs(epsg=4326))
@@ -454,23 +496,47 @@ def create_custom_leaflet_map(intersections_dir, sac_path, reserva_path, eep_pat
         gdf_construcciones = sanitize_gdf(gpd.read_file(construcciones_path).to_crs(epsg=4326))
         construcciones_geojson = gdf_construcciones.to_json()
     
-    # Generar rutas relativas para tiles PNG
+    # Generar URLs para tiles PNG (locales o GCS)
     output_dir = os.path.dirname(output_path)
     t1_tiles_js = []
     t2_tiles_js = []
     
-    for tile in png_images["t1_tiles"]:
-        rel_path = os.path.relpath(tile["path"], output_dir).replace("\\", "/")
-        b = tile["bounds"]
-        t1_tiles_js.append(f"L.imageOverlay('{rel_path}', [[{b[0][0]}, {b[0][1]}], [{b[1][0]}, {b[1][1]}]])")
-    
-    for tile in png_images["t2_tiles"]:
-        rel_path = os.path.relpath(tile["path"], output_dir).replace("\\", "/")
-        b = tile["bounds"]
-        t2_tiles_js.append(f"L.imageOverlay('{rel_path}', [[{b[0][0]}, {b[0][1]}], [{b[1][0]}, {b[1][1]}]])")
+    if use_gcs_urls and mes is not None:
+        # Usar URLs de GCS para los tiles
+        for i, tile in enumerate(png_images["t1_tiles"]):
+            # Obtener el nombre de la carpeta sentinel (ej: sentinel_2026-06-30_t1)
+            tile_dir = os.path.basename(os.path.dirname(tile["path"]))
+            tile_filename = os.path.basename(tile["path"])
+            gcs_url = get_map_tile_gcs_url(year, mes, f"{tile_dir}/{tile_filename}")
+            b = tile["bounds"]
+            t1_tiles_js.append(f"L.imageOverlay('{gcs_url}', [[{b[0][0]}, {b[0][1]}], [{b[1][0]}, {b[1][1]}]])")
+        
+        for i, tile in enumerate(png_images["t2_tiles"]):
+            tile_dir = os.path.basename(os.path.dirname(tile["path"]))
+            tile_filename = os.path.basename(tile["path"])
+            gcs_url = get_map_tile_gcs_url(year, mes, f"{tile_dir}/{tile_filename}")
+            b = tile["bounds"]
+            t2_tiles_js.append(f"L.imageOverlay('{gcs_url}', [[{b[0][0]}, {b[0][1]}], [{b[1][0]}, {b[1][1]}]])")
+        
+        print(f"   📍 Usando URLs de GCS para tiles PNG")
+    else:
+        # Usar rutas relativas locales (comportamiento original)
+        for tile in png_images["t1_tiles"]:
+            rel_path = os.path.relpath(tile["path"], output_dir).replace("\\", "/")
+            b = tile["bounds"]
+            t1_tiles_js.append(f"L.imageOverlay('{rel_path}', [[{b[0][0]}, {b[0][1]}], [{b[1][0]}, {b[1][1]}]])")
+        
+        for tile in png_images["t2_tiles"]:
+            rel_path = os.path.relpath(tile["path"], output_dir).replace("\\", "/")
+            b = tile["bounds"]
+            t2_tiles_js.append(f"L.imageOverlay('{rel_path}', [[{b[0][0]}, {b[0][1]}], [{b[1][0]}, {b[1][1]}]])")
 
     t1_tiles_layers = ',\n            '.join(t1_tiles_js)
     t2_tiles_layers = ',\n            '.join(t2_tiles_js)
+    
+    # URL del mapa interactivo en GCS
+    map_url = get_map_url(year, mes) if mes else ""
+    map_url_comment = f"<!-- Mapa alojado en: {map_url} -->" if map_url else ""
     
     # HTML template completo
     html_content = f'''<!DOCTYPE html>
@@ -487,6 +553,7 @@ def create_custom_leaflet_map(intersections_dir, sac_path, reserva_path, eep_pat
     </style>
 </head>
 <body>
+    {map_url_comment}
     <div id="map"></div>
     <script>
         var map = L.map('map').setView([4.65, -74.1], 11);
@@ -572,10 +639,20 @@ def create_custom_leaflet_map(intersections_dir, sac_path, reserva_path, eep_pat
     
     print(f"   ✅ Mapa personalizado guardado: {output_path}")
     print(f"   ✅ {len(png_images['t1_tiles'])} tiles T1 + {len(png_images['t2_tiles'])} tiles T2")
+    if mes:
+        print(f"   🌐 URL en GCS: {get_map_url(year, mes)}")
+
 
 
 def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_month_str, year, mes, sac, reserva, eep, construcciones_path=None):
-    """Genera mosaicos Sentinel y mapa interactivo usando PNG estáticos (optimizado)"""
+    """
+    Genera mosaicos Sentinel y mapa interactivo usando PNG estáticos (optimizado).
+    
+    Integración con GCS:
+    - Genera URLs de GCS para los tiles PNG del mapa interactivo
+    - El mapa se puede alojar en https://storage.googleapis.com/reportes-simbyp/
+    - Los tiles se referencian directamente desde GCS
+    """
     # Exportar imágenes Sentinel como PNG (solo tiles con expansión urbana)
     png_images = export_sentinel_as_png(
         aoi_path=aoi_path,
@@ -598,7 +675,9 @@ def generate_maps(aoi_path, bounds_prev, bounds_curr, dirs, month_str, previous_
         previous_month_str=previous_month_str,
         year=year,
         png_images=png_images,
-        construcciones_path=construcciones_path
+        construcciones_path=construcciones_path,
+        mes=mes  # Pasar mes para generar URLs de GCS
     )
     return map_html
+
 

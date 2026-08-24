@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import argparse
-from datetime import datetime
+from datetime import datetime, date
 import locale
 import sys
 import os
 import json
+import logging
 from google.cloud import storage
 import warnings
 import dotenv
@@ -28,11 +29,16 @@ from src.config import AOI_PATH, SAC_PATH, RESERVA_PATH, EEP_PATH, UPL_PATH, HEA
 from src.aux_utils import authenticate_gee, load_geometry, set_dates, cleanup_temp_data
 from src.stats_utils import calculate_expansion_areas, create_intersections
 from src.pipeline_utils import prepare_folders, build_report, initialize_sentinel_hub_config, process_new_constructions
-from src.maps_utils import generate_maps
+from src.maps_utils import generate_maps, get_map_url
+from src.database_config import get_database_url
+from src.report_logger import ReportLogger
 
 # Suppress warnings
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL 1.1.1+")
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 # === Configurar idioma español para nombres de meses ===
 try:
@@ -45,6 +51,15 @@ def main(anio: int, mes: int):
     # Check required environment variables
     if not GOOGLE_CLOUD_PROJECT:
         raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set. Please add it to your .env file.")
+
+    db_logging_enabled = True
+    try:
+        _ = get_database_url()
+        logger.info("Database connection parameters validated")
+    except ValueError as exc:
+        db_logging_enabled = False
+        logger.warning("Database not configured: %s", exc)
+        logger.warning("Reports will be generated and uploaded, but they will not be logged in reports_sent.")
     
     month_str = datetime(anio, mes, 1).strftime("%B").capitalize()
     # Handle January wraparound to previous year's December
@@ -166,6 +181,9 @@ def main(anio: int, mes: int):
         traceback.print_exc()
         map_html = None
 
+    report_local_path = None
+    top_upls_for_log = []
+
     # === 5. Reporte ===
     print("\n" + "="*70)
     print("📄 GENERANDO REPORTE")
@@ -181,7 +199,7 @@ def main(anio: int, mes: int):
                 print(f"⚠️ No se detectó expansión urbana para {month_str} {anio}")
                 print(f"📄 Generando reporte sin expansión...")
                 from src.pipeline_utils import build_no_expansion_report
-                build_no_expansion_report(
+                report_local_path = build_no_expansion_report(
                     header_img1_path=HEADER_IMG1_PATH,
                     header_img2_path=HEADER_IMG2_PATH,
                     footer_img_path=FOOTER_IMG_PATH,
@@ -192,7 +210,8 @@ def main(anio: int, mes: int):
                 )
             else:
                 # CSV tiene datos, generar reporte normal
-                build_report(
+                top_upls_for_log = df.nlargest(5, 'interseccion_ha')[['NOMBRE', 'interseccion_ha', 'total_ha']].to_dict('records')
+                report_local_path = build_report(
                     df_path=stats_csv,
                     map_html=map_html,
                     header_img1_path=HEADER_IMG1_PATH,
@@ -206,7 +225,7 @@ def main(anio: int, mes: int):
         except Exception as e:
             print(f"⚠️ Error leyendo CSV: {e}")
             # Si hay error leyendo CSV, intentar generar reporte normal
-            build_report(
+            report_local_path = build_report(
                 df_path=stats_csv,
                 map_html=map_html,
                 header_img1_path=HEADER_IMG1_PATH,
@@ -221,7 +240,7 @@ def main(anio: int, mes: int):
         print(f"[RESULTADO] No se detectó expansión urbana para {month_str} {anio}")
         print(f"📄 Generando reporte sin expansión...")
         from src.pipeline_utils import build_no_expansion_report
-        build_no_expansion_report(
+        report_local_path = build_no_expansion_report(
             header_img1_path=HEADER_IMG1_PATH,
             header_img2_path=HEADER_IMG2_PATH,
             footer_img_path=FOOTER_IMG_PATH,
@@ -233,16 +252,20 @@ def main(anio: int, mes: int):
 
     # === Subir carpeta completa a GCS ===
     def upload_folder_to_gcs(local_folder, gcs_bucket, gcs_prefix):
-        # Archivos legacy del sistema Dynamic World que no deben subirse
-        legacy_patterns = ['dw_and_sar', 'dw_only', 'sar_only', '_sar.csv']
+        # Archivos que NO deben subirse
+        exclude_patterns = [
+            'dw_and_sar', 'dw_only', 'sar_only', '_sar.csv',  # Legacy Dynamic World
+            'urban_sprawl_reporte.json',  # Archivos JSON temporales del renderizado
+            'urban_sprawl_reporte_temp.json'  # Otros temporales
+        ]
         
         client = storage.Client()
         bucket = client.bucket(gcs_bucket)
         for root, dirs_files, files in os.walk(local_folder):
             for file in files:
-                # Saltar archivos legacy de Dynamic World
-                if any(pattern in file for pattern in legacy_patterns):
-                    print(f"[SKIP] Omitiendo {file} (archivo legacy)")
+                # Saltar archivos excluidos
+                if any(pattern in file for pattern in exclude_patterns):
+                    print(f"[SKIP] Omitiendo {file} (excluido)")
                     continue
                     
                 local_path = os.path.join(root, file)
@@ -255,6 +278,38 @@ def main(anio: int, mes: int):
     print("[GCS] Subiendo outputs a GCS...")
     fecha_rango = f"{anio}_{mes:02d}"
     upload_folder_to_gcs(OUTPUT_FOLDER, GCS_OUTPUT_BUCKET, f"{GCS_OUTPUT_PREFIX}/{fecha_rango}")
+
+    if db_logging_enabled:
+        try:
+            report_filename = f"urban_sprawl_reporte_{anio}_{mes:02d}.html"
+            if report_local_path:
+                report_filename = os.path.basename(report_local_path)
+
+            report_url = (
+                f"https://storage.googleapis.com/{GCS_OUTPUT_BUCKET}/"
+                f"{GCS_OUTPUT_PREFIX}/{fecha_rango}/reportes/{report_filename}"
+            )
+            map_url = get_map_url(anio, mes)
+
+            report_id = ReportLogger.log_report(
+                alert_type="monthly_built_area",
+                report_title=f"Reporte Mensual - Area Construida {month_str} {anio}",
+                report_url=report_url,
+                report_date=date(anio, mes, 1),
+                gcs_bucket=GCS_OUTPUT_BUCKET,
+                gcs_prefix=GCS_OUTPUT_PREFIX,
+                year=anio,
+                month=mes,
+                top_upls=top_upls_for_log,
+                map_url=map_url,
+            )
+
+            if report_id:
+                logger.info("Report logged to reports_sent with ID: %s", report_id)
+            else:
+                logger.warning("Report generated but failed to log in reports_sent.")
+        except Exception as exc:
+            logger.error("Unexpected error logging report to database: %s", exc, exc_info=True)
 
     print("✅ Proceso completo. Archivos guardados en:")
     print(f"   - Local: {OUTPUT_FOLDER}")
