@@ -6,6 +6,12 @@ Análisis de expansión urbana para Bogotá utilizando Google Earth Engine - Dyn
 
 Este proyecto analiza la expansión urbana mensual en el área de Bogotá mediante el procesamiento de imágenes satelitales de Dynamic World. Genera reportes con mapas interactivos, estadísticas y análisis de intersecciones con áreas protegidas (SAC, Reserva de Cerros Orientales y Estructura Ecológica Principal).
 
+## Diagrama de Arquitectura
+
+![Arquitectura de simbyp_area_construida](docs/architecture-preview.png)
+
+Diagrama interactivo (zoom, temas, exportación): [`docs/architecture.html`](docs/architecture.html) — generado con [Archify](https://github.com/tt-a1i/archify).
+
 ## Características
 
 - Procesamiento automatizado de imágenes satelitales Dynamic World

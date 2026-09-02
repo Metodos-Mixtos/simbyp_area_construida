@@ -80,8 +80,11 @@ data/
 *.htm
 # Exception: Keep template file
 !reporte/report_template.html
+# Exception: Keep architecture diagram docs
+!docs/architecture.html
 *.png
 *.PNG
+!docs/architecture-preview.png
 *.jpg
 *.jpeg
 *.JPG
