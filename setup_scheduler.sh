@@ -1,7 +1,16 @@
 #!/bin/bash
 
 # Cloud Scheduler Setup for Cloud Run Job
-# Schedules the simbyp-area-construida job to run on the first Friday of every month
+# Schedules the simbyp-area-construida job to run once a month, early enough
+# that its report is in GCS well before the first Friday email send.
+#
+# NOTE: this used to be "0 0 1-7 * 5" ("day-of-month 1-7 AND Friday"), but
+# standard cron treats day-of-month and day-of-week as OR when both are
+# restricted, so it actually fired on every one of the 1st-7th (any weekday)
+# plus every other Friday of the month - far more often than intended, and
+# not reliably limited to early-month. The job doesn't need to run on a
+# Friday at all: it always processes the *previous* month, which is complete
+# as soon as the new month starts, so a fixed day works fine.
 
 set -e
 
@@ -24,7 +33,7 @@ fi
 echo "Setting up Cloud Scheduler for $JOB_NAME"
 echo "Project: $PROJECT_ID"
 echo "Region: $REGION"
-echo "Cron schedule: 0 0 1-7 * 5 (First Friday of every month at midnight UTC)"
+echo "Cron schedule: 0 6 1 * * (1st of every month at 06:00 UTC)"
 echo ""
 
 # Set project
@@ -64,7 +73,7 @@ if gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --location="$REGION" --p
     echo "Scheduler job already exists. Updating..."
     gcloud scheduler jobs update http "$SCHEDULER_JOB_NAME" \
         --location="$REGION" \
-        --schedule="0 0 1-7 * 5" \
+        --schedule="0 6 1 * *" \
         --http-method="POST" \
         --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/${JOB_NAME}:run" \
         --oidc-service-account-email="$SERVICE_ACCOUNT_EMAIL" \
@@ -75,7 +84,7 @@ else
     echo "Creating scheduler job..."
     gcloud scheduler jobs create http "$SCHEDULER_JOB_NAME" \
         --location="$REGION" \
-        --schedule="0 0 1-7 * 5" \
+        --schedule="0 6 1 * *" \
         --http-method="POST" \
         --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/${JOB_NAME}:run" \
         --oidc-service-account-email="$SERVICE_ACCOUNT_EMAIL" \
@@ -90,7 +99,7 @@ echo ""
 echo "Job details:"
 echo "  Name: $SCHEDULER_JOB_NAME"
 echo "  Region: $REGION"
-echo "  Schedule: First Friday of every month at midnight UTC (0 0 1-7 * 5)"
+echo "  Schedule: 1st of every month at 06:00 UTC (0 6 1 * *)"
 echo "  Triggers: $JOB_NAME Cloud Run Job"
 echo ""
 echo "View in Cloud Console:"
