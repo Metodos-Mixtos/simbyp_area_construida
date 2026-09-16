@@ -40,14 +40,14 @@ def get_downloadable_url(year: int, month: int, filename: str, subfolder: str = 
         year: Año (ej: 2026)
         month: Mes (ej: 7)
         filename: Nombre del archivo descargable
-        subfolder: Subcarpeta ('dw', 'intersections', 'stats') si es necesario
-    
+        subfolder: Subcarpeta ('new_constructions', 'intersections', 'stats') si es necesario
+
     Returns:
-        URL completa de GCS (ej: https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/dw/new_urban_2026_07.geojson)
-    
+        URL completa de GCS (ej: https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/new_constructions/new_urban.geojson)
+
     Ejemplos:
         # Archivo de construcciones nuevas
-        get_downloadable_url(2026, 7, "new_urban_2026_07.geojson", "dw")
+        get_downloadable_url(2026, 7, "new_urban.geojson", "new_constructions")
         
         # Archivo de intersecciones
         get_downloadable_url(2026, 7, "new_urban_2026_07_intersections.geojson", "intersections")
@@ -81,7 +81,7 @@ def get_downloadable_urls(year: int, month: int) -> dict:
         urls = get_downloadable_urls(2026, 7)
         # Retorna:
         # {
-        #   "new_urban": "https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/dw/new_urban_2026_07.geojson",
+        #   "new_urban": "https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/new_constructions/new_urban.geojson",
         #   "intersections": "https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/intersections/new_urban_2026_07_intersections.geojson",
         #   "no_intersections": "https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/intersections/new_urban_2026_07_no_intersections.geojson",
         #   "stats_csv": "https://storage.googleapis.com/reportes-simbyp/urban_sprawl/2026_07/stats/resumen_expansion_upl_ha_2026_07.csv"
@@ -90,7 +90,7 @@ def get_downloadable_urls(year: int, month: int) -> dict:
     year_month = f"{year}_{month:02d}"
     base_url = f"{BUCKET_BASE_URL}/urban_sprawl/{year_month}"
     return {
-        "new_urban": f"{base_url}/dw/new_urban_{year_month}.geojson",
+        "new_urban": f"{base_url}/new_constructions/new_urban.geojson",
         "intersections": f"{base_url}/intersections/new_urban_{year_month}_intersections.geojson",
         "no_intersections": f"{base_url}/intersections/new_urban_{year_month}_no_intersections.geojson",
         "stats_csv": f"{base_url}/stats/resumen_expansion_upl_ha_{year_month}.csv",
@@ -1470,7 +1470,7 @@ def build_report(df_path, map_html, header_img1_path, header_img2_path, footer_i
         "NO_INTER_GEOJSON_URL": downloadable_urls["no_intersections"],
         "CSV_URL": downloadable_urls["stats_csv"],
         # Nombres de archivo (para compatibilidad hacia atrás si el template los requiere)
-        "TIF_FILENAME": f"new_urban_{year}_{mes_num:02d}.geojson",
+        "TIF_FILENAME": "new_urban.geojson",
         "INTER_GEOJSON_FILENAME": f"new_urban_{year}_{mes_num:02d}_intersections.geojson",
         "NO_INTER_GEOJSON_FILENAME": f"new_urban_{year}_{mes_num:02d}_no_intersections.geojson",
         "CSV_FILENAME": f"resumen_expansion_upl_ha_{year}_{mes_num:02d}.csv"

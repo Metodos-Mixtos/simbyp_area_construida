@@ -107,8 +107,12 @@ def _build_metadata(
             "url": f"{base_gs}/stats/resumen_expansion_upl_ha_{year}_{month:02d}.csv",
         },
         {
+            # Nota: antes apuntaba a "dw/new_urban_{year}_{month}.geojson" (carpeta legacy
+            # de la metodología Dynamic World, ya no existe -> 404). El archivo real lo
+            # genera process_new_constructions() en new_constructions/new_urban.geojson,
+            # sin sufijo de fecha en el nombre.
             "name": "Expansion urbana detectada (GeoJSON)",
-            "url": f"{base_gs}/dw/new_urban_{year}_{month:02d}.geojson",
+            "url": f"{base_gs}/new_constructions/new_urban.geojson",
         },
         {
             "name": "Expansion urbana con restricciones (GeoJSON)",
@@ -118,10 +122,8 @@ def _build_metadata(
             "name": "Expansion urbana sin restricciones (GeoJSON)",
             "url": f"{base_gs}/intersections/new_urban_{year}_{month:02d}_no_intersections.geojson",
         },
-        {
-            "name": "Raster de deteccion (TIF)",
-            "url": f"{base_gs}/dw/new_urban_{year}_{month:02d}.tif",
-        },
+        # Nota: se eliminó la entrada "Raster de deteccion (TIF)" — la metodología actual
+        # (Sentinel-1 VV + NDVI) nunca genera ni sube ese .tif; el link siempre daba 404.
     ]
 
     return {

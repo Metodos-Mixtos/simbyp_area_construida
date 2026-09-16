@@ -87,6 +87,40 @@ def sanitize_gdf(gdf):
             gdf[col] = gdf[col].apply(lambda v: str(v) if not isinstance(v, (int, float, str)) else v)
     return gdf
 
+def read_geojson_gcs(path):
+    """
+    Lee un GeoJSON desde una ruta gs:// descargándolo primero a un archivo local,
+    en vez de dejar que GDAL lo lea directamente vía su driver /vsigs/ (gpd.read_file
+    con una ruta gs:// hace esto por debajo). Esa lectura directa depende de que GDAL
+    obtenga un token OAuth2 usando el backend SSL "schannel" de Windows, el cual falla
+    de forma consistente cuando la ruta del proyecto contiene caracteres no-ASCII (p.ej.
+    la tilde en "Métodos" de esta carpeta de OneDrive), con el error:
+    "Fetching OAuth2 access code from auth code failed... schannel: failed to open CA file".
+    Descargar primero con la librería de Google Cloud Storage evita ese código de GDAL.
+    """
+    from src.aux_utils import download_gcs_to_temp
+    local_path = download_gcs_to_temp(path) if str(path).startswith("gs://") else path
+    return gpd.read_file(local_path)
+
+def simplify_gdf_for_map(gdf, tolerance_m=10):
+    """
+    Simplifica la geometría de un GeoDataFrame para reducir su peso al embeberla
+    en un mapa web (json inline). Reproyecta a un CRS métrico (Bogotá, EPSG:3116),
+    aplica shapely.simplify() con tolerancia en metros, y devuelve a EPSG:4326.
+
+    Capas como eep.geojson (Estructura Ecológica Principal) traen un detalle de
+    vértices muchísimo mayor al necesario para visualizarse en un mapa web (llegan
+    a pesar >100MB), lo que hace que el HTML del mapa tarde demasiado en cargar o
+    directamente no cargue. Una tolerancia de 10m es imperceptible al zoom en que
+    se usan estas capas (ciudad/localidad), pero reduce drásticamente el tamaño.
+    """
+    if gdf.empty:
+        return gdf
+    original_crs = gdf.crs
+    gdf_proj = gdf.to_crs(epsg=3116)
+    gdf_proj["geometry"] = gdf_proj.geometry.simplify(tolerance_m, preserve_topology=True)
+    return gdf_proj.to_crs(original_crs)
+
 def get_map_tile_gcs_url(year: int, month: int, tile_filename: str) -> str:
     """
     Genera URL de GCS para un tile PNG del mapa.
@@ -390,9 +424,12 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
 
     # Fallback: usar Folium (para casos sin PNG)
     # Leer y limpiar capas base
-    gdf_sac = sanitize_gdf(gpd.read_file(sac_path).to_crs(epsg=4326))
-    gdf_res = sanitize_gdf(gpd.read_file(reserva_path).to_crs(epsg=4326))
-    gdf_eep = sanitize_gdf(gpd.read_file(eep_path).to_crs(epsg=4326))
+    # Nota: se simplifica la geometría (tolerancia 10m) antes de embeberla en el mapa.
+    # eep.geojson en particular trae un detalle de vértices excesivo (>100MB), lo que
+    # hacía que el HTML del mapa no cargara en el navegador.
+    gdf_sac = simplify_gdf_for_map(sanitize_gdf(read_geojson_gcs(sac_path).to_crs(epsg=4326)))
+    gdf_res = simplify_gdf_for_map(sanitize_gdf(read_geojson_gcs(reserva_path).to_crs(epsg=4326)))
+    gdf_eep = simplify_gdf_for_map(sanitize_gdf(read_geojson_gcs(eep_path).to_crs(epsg=4326)))
 
     # Filtrar SAC
     sac_filtro = [
@@ -405,7 +442,15 @@ def plot_expansion_interactive(intersections_dir, sac_path, reserva_path, eep_pa
         gdf_sac = gdf_sac[gdf_sac["sac"].isin(sac_filtro)]
 
     # Crear mapa base
-    m = folium.Map(location=[4.65, -74.1], zoom_start=11, tiles="cartodb positron")
+    # Nota: se usa Esri World Gray Canvas en vez de "cartodb positron" (exige API key)
+    # u OpenStreetMap crudo (bloquea con 403 en mapas con muchos tiles simultáneos
+    # como este, que cubre toda Bogotá; ver osm.wiki/Blocked).
+    m = folium.Map(
+        location=[4.65, -74.1],
+        zoom_start=11,
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        attr="Tiles © Esri — Esri, DeLorme, NAVTEQ"
+    )
     
     gdf_aoi = gpd.read_file(aoi_path).to_crs(epsg=4326)
     
@@ -476,9 +521,12 @@ def create_custom_leaflet_map(intersections_dir, sac_path, reserva_path, eep_pat
     """
     
     # Leer capas GeoJSON
-    gdf_sac = sanitize_gdf(gpd.read_file(sac_path).to_crs(epsg=4326))
-    gdf_res = sanitize_gdf(gpd.read_file(reserva_path).to_crs(epsg=4326))
-    gdf_eep = sanitize_gdf(gpd.read_file(eep_path).to_crs(epsg=4326))
+    # Nota: se simplifica la geometría (tolerancia 10m) antes de embeberla en el mapa.
+    # eep.geojson en particular trae un detalle de vértices excesivo (>100MB), lo que
+    # hacía que el HTML del mapa no cargara en el navegador.
+    gdf_sac = simplify_gdf_for_map(sanitize_gdf(read_geojson_gcs(sac_path).to_crs(epsg=4326)))
+    gdf_res = simplify_gdf_for_map(sanitize_gdf(read_geojson_gcs(reserva_path).to_crs(epsg=4326)))
+    gdf_eep = simplify_gdf_for_map(sanitize_gdf(read_geojson_gcs(eep_path).to_crs(epsg=4326)))
     
     # Filtrar SAC
     sac_filtro = [
@@ -559,9 +607,12 @@ def create_custom_leaflet_map(intersections_dir, sac_path, reserva_path, eep_pat
         var map = L.map('map').setView([4.65, -74.1], 11);
         
         // Mapa base
-        var baseLayer = L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-            attribution: '© OpenStreetMap contributors © CARTO',
-            maxZoom: 19
+        // Nota: se usa Esri World Gray Canvas en vez de CARTO (exige API key) u
+        // OpenStreetMap crudo (bloquea con 403 en mapas con muchos tiles simultáneos
+        // como este, que cubre toda Bogotá; ver osm.wiki/Blocked).
+        var baseLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
+            attribution: 'Tiles © Esri — Esri, DeLorme, NAVTEQ',
+            maxZoom: 16
         }}).addTo(map);
         
         // Sentinel-2 periodo anterior (T1)
@@ -616,7 +667,7 @@ def create_custom_leaflet_map(intersections_dir, sac_path, reserva_path, eep_pat
         
         // Control de capas
         var baseMaps = {{
-            "CartoDB Positron": baseLayer
+            "Esri Light Gray": baseLayer
         }};
         
         var overlayMaps = {{
